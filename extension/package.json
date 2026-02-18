@@ -1,0 +1,29 @@
+{
+  "name": "return-clarity-extension",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chrome extension that extracts and displays return policy summaries for Shopify stores",
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --watch --mode development",
+    "build": "tsc --noEmit && vite build && node scripts/postbuild.js",
+    "postbuild": "node scripts/postbuild.js",
+    "lint": "eslint src --ext .ts,.tsx",
+    "lint:fix": "eslint src --ext .ts,.tsx --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx,html,css}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,html,css}\"",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "@typescript-eslint/eslint-plugin": "^7.1.0",
+    "@typescript-eslint/parser": "^7.1.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.1.3",
+    "prettier": "^3.2.5",
+    "typescript": "^5.3.3",
+    "vite": "^5.1.4"
+  }
+}

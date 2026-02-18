@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Return Clarity</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <header class="header">
+      <h1 class="title">Return Clarity</h1>
+      <span class="version">v1.0.0</span>
+    </header>
+    
+    <section class="detection-status">
+      <div class="status-row">
+        <div class="status-indicator" id="status-indicator"></div>
+        <div class="status-text">
+          <div id="detection-text">Checking...</div>
+          <div id="confidence-text" class="confidence"></div>
+        </div>
+      </div>
+    </section>
+    
+    <section class="policy-summary" id="policy-summary">
+      <h2 class="section-title">Return Summary</h2>
+      
+      <dl class="summary-list">
+        <div class="summary-item">
+          <dt>Window:</dt>
+          <dd id="return-window">—</dd>
+        </div>
+        
+        <div class="summary-item">
+          <dt>Condition:</dt>
+          <dd id="condition">—</dd>
+        </div>
+        
+        <div class="summary-item">
+          <dt>Fees:</dt>
+          <dd id="fees">—</dd>
+        </div>
+        
+        <div class="summary-item">
+          <dt>Shipping:</dt>
+          <dd id="shipping">—</dd>
+        </div>
+        
+        <div class="summary-item">
+          <dt>Exclusions:</dt>
+          <dd id="exclusions">—</dd>
+        </div>
+      </dl>
+    </section>
+    
+    <footer class="footer">
+      <button id="save-snapshot" class="btn btn-primary" disabled>
+        Save Snapshot
+      </button>
+      <button id="view-history" class="btn btn-secondary" disabled>
+        View History
+      </button>
+    </footer>
+    
+    <div id="error-message" class="error hidden"></div>
+  </div>
+  
+  <script src="popup.ts" type="module"></script>
+</body>
+</html>
