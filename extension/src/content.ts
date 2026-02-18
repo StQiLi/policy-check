@@ -7,7 +7,7 @@ import { detectShopify } from './shared/shopifyDetect';
 import { resolvePolicyUrls, isPolicyPage } from './shared/policyResolver';
 import { extractPolicy } from './shared/extract';
 import { logger } from './shared/logger';
-import type { ExtensionMessage } from './shared/types';
+import type { ExtensionMessage, PolicyUrls } from './shared/types';
 
 /**
  * Safely send a message to the background service worker.
@@ -37,13 +37,8 @@ async function run(): Promise<void> {
       return;
     }
 
-    const urls = await resolvePolicyUrls();
-    if (urls.refundPolicy) {
-      const summary = extractPolicy(urls.refundPolicy);
-      sendMessage({ type: 'POLICY_EXTRACTED', data: summary });
-    } else {
-      sendMessage({ type: 'POLICY_NOT_FOUND', domain: detection.domain });
-    }
+    const urls: PolicyUrls = await resolvePolicyUrls();
+    sendMessage({ type: 'POLICY_URLS_RESOLVED', data: urls, domain: detection.domain });
   } catch (error) {
     logger.error('Content script error:', error);
     sendMessage({

@@ -5,7 +5,10 @@
  */
 
 import { logger } from './shared/logger';
-import type { ExtensionMessage, TabState, DetectionResult, PolicySummary } from './shared/types';
+import { extractPolicyFromText, stripHtmlToText } from './shared/extract';
+import { getCachedSummary, setCachedSummary } from './shared/cache';
+import { getPolicyType } from './shared/policyResolver';
+import type { ExtensionMessage, TabState, DetectionResult, PolicySummary, PolicyUrls } from './shared/types';
 
 // ── Per-tab state (lost on service-worker restart) ──────────────
 
@@ -40,9 +43,22 @@ chrome.runtime.onMessage.addListener(
 
       case 'GET_TAB_STATE': {
         const state = tabStates.get(message.tabId);
-        sendResponse({ state: state ?? { detection: null, summary: null } });
+        sendResponse({ state: state ?? { detection: null, summary: null, status: 'idle', fromCache: false } });
         return false;
       }
+
+      case 'POLICY_URLS_RESOLVED':
+        handlePolicyUrlsResolved(message.data, message.domain, tabId)
+          .then(() => sendResponse({ success: true }))
+          .catch((err: Error) => {
+            logger.error('Policy fetch failed:', err);
+            if (tabId) {
+              const cur = tabStates.get(tabId) ?? { detection: null, summary: null, status: 'idle' as const, fromCache: false };
+              tabStates.set(tabId, { ...cur, status: 'error' });
+            }
+            sendResponse({ success: false, error: err.message });
+          });
+        return true;
 
       case 'SAVE_SNAPSHOT':
         // Async -- must return true to keep the channel open.
@@ -69,8 +85,8 @@ chrome.runtime.onMessage.addListener(
 function handleShopifyDetected(detection: DetectionResult, tabId?: number): void {
   if (!tabId) return;
 
-  const current = tabStates.get(tabId) ?? { detection: null, summary: null };
-  tabStates.set(tabId, { ...current, detection });
+  const current = tabStates.get(tabId) ?? { detection: null, summary: null, status: 'idle' as const, fromCache: false };
+  tabStates.set(tabId, { ...current, detection, status: 'detecting' });
 
   if (detection.isShopify && detection.confidence >= 25) {
     chrome.action.setBadgeText({ text: 'RC', tabId });
@@ -82,15 +98,75 @@ function handleShopifyDetected(detection: DetectionResult, tabId?: number): void
 
 function handlePolicyExtracted(summary: PolicySummary, tabId?: number): void {
   if (!tabId) return;
-  const current = tabStates.get(tabId) ?? { detection: null, summary: null };
-  tabStates.set(tabId, { ...current, summary });
+  const current = tabStates.get(tabId) ?? { detection: null, summary: null, status: 'idle' as const, fromCache: false };
+  tabStates.set(tabId, { ...current, summary, status: 'done', fromCache: false });
   logger.debug('Policy extracted for tab', tabId);
 }
 
 function handlePolicyNotFound(domain: string, tabId?: number): void {
   logger.debug('No policy found for', domain);
   if (tabId) {
+    const current = tabStates.get(tabId) ?? { detection: null, summary: null, status: 'idle' as const, fromCache: false };
+    tabStates.set(tabId, { ...current, status: 'done' });
     chrome.action.setBadgeBackgroundColor({ color: '#F59E0B', tabId });
+  }
+}
+
+async function handlePolicyUrlsResolved(
+  urls: PolicyUrls,
+  domain: string,
+  tabId?: number,
+): Promise<void> {
+  if (!tabId) return;
+
+  const current = tabStates.get(tabId) ?? { detection: null, summary: null, status: 'idle' as const, fromCache: false };
+  tabStates.set(tabId, { ...current, status: 'fetching' });
+
+  const cached = await getCachedSummary(domain);
+  if (cached) {
+    tabStates.set(tabId, { ...current, summary: cached, status: 'done', fromCache: true });
+    logger.debug('Cache hit for', domain);
+    return;
+  }
+
+  const policyUrl = urls.refundPolicy ?? urls.shippingPolicy;
+  if (!policyUrl) {
+    tabStates.set(tabId, { ...current, status: 'done', fromCache: false });
+    return;
+  }
+
+  tabStates.set(tabId, { ...tabStates.get(tabId)!, status: 'extracting' });
+  const html = await fetchPolicyHtml(policyUrl);
+  const text = stripHtmlToText(html);
+  const summary = extractPolicyFromText(text, policyUrl, domain);
+
+  await setCachedSummary(domain, summary);
+  tabStates.set(tabId, { ...tabStates.get(tabId)!, summary, status: 'done', fromCache: false });
+  logger.debug('Policy extracted and cached for', domain);
+}
+
+async function fetchPolicyHtml(url: string): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: 'text/html' },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Policy page returned ${response.status}: ${url}`);
+    }
+
+    const contentType = response.headers.get('content-type') ?? '';
+    if (!contentType.includes('text/html')) {
+      throw new Error(`Unexpected content type ${contentType} for ${url}`);
+    }
+
+    return response.text();
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -106,10 +182,10 @@ async function saveSnapshot(summary: PolicySummary): Promise<unknown> {
   const payload = {
     store_domain: summary.storeDomain,
     policy_url: summary.policyUrl,
-    policy_type: 'refund', // TODO: infer from URL via getPolicyType()
+    policy_type: getPolicyType(summary.policyUrl),
     summary: { fields: summary.fields, confidence: summary.confidence },
     raw_text_snippet: summary.rawTextSnippet,
-    user_agent: navigator.userAgent,
+    user_agent: 'Chrome Extension',
     extension_version: EXTENSION_VERSION,
   };
 

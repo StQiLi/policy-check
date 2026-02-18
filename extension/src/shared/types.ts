@@ -63,6 +63,7 @@ export type ExtensionMessage =
   | { type: 'SHOPIFY_DETECTED'; data: DetectionResult }
   | { type: 'POLICY_EXTRACTED'; data: PolicySummary }
   | { type: 'POLICY_NOT_FOUND'; domain: string }
+  | { type: 'POLICY_URLS_RESOLVED'; data: PolicyUrls; domain: string }
   | { type: 'GET_TAB_STATE'; tabId: number }
   | { type: 'SAVE_SNAPSHOT'; data: PolicySummary }
   | { type: 'ERROR'; error: string };
@@ -70,4 +71,6 @@ export type ExtensionMessage =
 export interface TabState {
   detection: DetectionResult | null;
   summary: PolicySummary | null;
+  status: 'idle' | 'detecting' | 'fetching' | 'extracting' | 'done' | 'error';
+  fromCache: boolean;
 }

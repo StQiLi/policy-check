@@ -52,7 +52,9 @@ function findPolicyInFooter(keywords: string[]): string | null {
 
     if (keywords.some((kw) => text.includes(kw) || href.includes(kw))) {
       try {
-        return new URL(href, window.location.origin).href;
+        const resolved = new URL(href, window.location.origin).href;
+        if (new URL(resolved).origin !== window.location.origin) return null;
+        return resolved;
       } catch {
         return null;
       }
