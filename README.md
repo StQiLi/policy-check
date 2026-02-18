@@ -1,4 +1,4 @@
-# Return Clarity for Shopify
+# Return Clarity
 
 A Chrome extension and Rails API backend that helps consumers understand return policies on Shopify stores before making a purchase.
 
