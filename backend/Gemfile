@@ -20,6 +20,9 @@ gem 'rack-attack'
 # Environment variables
 gem 'dotenv-rails'
 
+# OpenAI API client
+gem 'ruby-openai'
+
 # JSON serialization
 gem 'jbuilder'
 
@@ -27,7 +30,7 @@ gem 'jbuilder'
 gem 'bootsnap', require: false
 
 group :development, :test do
-  gem 'debug', platforms: %i[ mri windows ]
+  gem 'debug', platforms: %i[ mri mingw x64_mingw ]
   gem 'rspec-rails', '~> 6.0'
   gem 'factory_bot_rails'
   gem 'faker'

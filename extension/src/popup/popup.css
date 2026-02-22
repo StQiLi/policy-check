@@ -21,6 +21,37 @@ body {
   padding: 16px;
 }
 
+/* Only one state visible at a time; controlled by data-state on #popup-root */
+#popup-root #scanning-state,
+#popup-root #not-shopify-state,
+#popup-root #policy-not-found-state,
+#popup-root #detection-status-section,
+#popup-root #policy-summary {
+  display: none;
+}
+#popup-root #policy-link {
+  display: none;
+}
+#popup-root[data-state="scanning"] #scanning-state {
+  display: flex;
+}
+#popup-root[data-state="not-shopify"] #not-shopify-state {
+  display: flex;
+}
+#popup-root[data-state="policy-not-found"] #policy-not-found-state {
+  display: flex;
+}
+#popup-root[data-state="results"] #detection-status-section {
+  display: block;
+}
+#popup-root[data-state="results"] #policy-summary {
+  display: flex;
+  flex-direction: column;
+}
+#popup-root[data-state="results"] #policy-link {
+  display: block;
+}
+
 /* Header */
 .header {
   display: flex;
@@ -183,4 +214,109 @@ body {
 .loading {
   opacity: 0.6;
   pointer-events: none;
+}
+
+/* Spinner */
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid #e5e7eb;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* State Sections */
+.state-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  text-align: center;
+  gap: 8px;
+}
+.state-heading {
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+}
+.state-subtext {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.5;
+}
+
+/* Debug line when "Not a Shopify store" — shows detection indicators */
+.debug-line {
+  margin-top: 12px;
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+  color: #9ca3af;
+  line-height: 1.4;
+  word-break: break-word;
+}
+.debug-line:empty {
+  display: none;
+}
+
+.debug-actions {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.debug-actions-hint {
+  font-size: 10px;
+  color: #9ca3af;
+}
+.btn-small {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+/* Confidence Dots */
+.confidence-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: 6px;
+  vertical-align: middle;
+  background-color: #d1d5db;
+}
+.confidence-dot[data-level="high"] { background-color: #10b981; }
+.confidence-dot[data-level="medium"] { background-color: #f59e0b; }
+.confidence-dot[data-level="low"] { background-color: #d1d5db; }
+
+/* Cache Badge */
+.cache-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 500;
+  color: #6b7280;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+/* Policy Link */
+.policy-link {
+  display: block;
+  font-size: 11px;
+  color: #6b7280;
+  text-decoration: none;
+  margin-top: 8px;
+  text-align: center;
+}
+.policy-link:hover {
+  color: #3b82f6;
+  text-decoration: underline;
 }

@@ -6,7 +6,7 @@ class CreatePolicySnapshots < ActiveRecord::Migration[7.2]
       t.string :policy_type, null: false
       t.string :policy_url, null: false
       t.text :raw_text_snippet
-      t.jsonb :summary, default: {}
+      t.json :summary, default: {}
       t.datetime :extracted_at, null: false
       t.string :checksum, null: false
       

@@ -7,22 +7,18 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 /**
  * Manual multi-entry build for Chrome MV3.
  *
- * Produces:
- *   dist/content.js
- *   dist/background.js
- *   dist/popup/index.html  (+ popup.js, popup.css)
- *
- * After building, copy manifest.json and icons/ into dist/ via the
- * `postbuild` npm script (or use the vite-plugin-static-copy below).
+ * Produces: dist/background.js, dist/popup/...
+ * content.js is built separately (vite.content.config.ts) as IIFE so it
+ * can be injected via chrome.scripting.executeScript.
  */
 export default defineConfig({
   build: {
     outDir: 'dist',
-    emptyOutDir: true,
+    // In dev (watch), don't empty so we keep content.js from the separate IIFE build
+    emptyOutDir: process.env.KEEP_DIST !== '1',
     sourcemap: process.env.NODE_ENV !== 'production',
     rollupOptions: {
       input: {
-        content: resolve(__dirname, 'src/content.ts'),
         background: resolve(__dirname, 'src/background.ts'),
         popup: resolve(__dirname, 'src/popup/index.html'),
       },

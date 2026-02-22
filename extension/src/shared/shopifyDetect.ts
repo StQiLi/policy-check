@@ -11,10 +11,10 @@ import type { DetectionResult } from './types';
  * load assets from cdn.shopify.com even on custom domains.
  */
 const WEIGHTS: Record<keyof DetectionResult['indicators'], number> = {
-  hasShopifyGlobal: 40,
+  hasShopifyGlobal: 25,
   hasMetaTags: 25,
-  hasCdnAssets: 15,
-  isMyshopifyDomain: 20,
+  hasCdnAssets: 25,
+  isMyshopifyDomain: 25,
 };
 
 export function detectShopify(): DetectionResult {

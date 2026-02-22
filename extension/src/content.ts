@@ -5,9 +5,8 @@
 
 import { detectShopify } from './shared/shopifyDetect';
 import { resolvePolicyUrls, isPolicyPage } from './shared/policyResolver';
-import { extractPolicy } from './shared/extract';
 import { logger } from './shared/logger';
-import type { ExtensionMessage } from './shared/types';
+import type { ExtensionMessage, PolicyUrls } from './shared/types';
 
 /**
  * Safely send a message to the background service worker.
@@ -26,24 +25,22 @@ async function run(): Promise<void> {
   try {
     const detection = detectShopify();
 
-    if (!detection.isShopify) return;
-
-    logger.info('Shopify store detected:', detection.domain, `(${detection.confidence}%)`);
     sendMessage({ type: 'SHOPIFY_DETECTED', data: detection });
 
+    if (!detection.isShopify) return;
+
     if (isPolicyPage()) {
-      const summary = extractPolicy(window.location.href);
-      sendMessage({ type: 'POLICY_EXTRACTED', data: summary });
+      sendMessage({
+        type: 'POLICY_PAGE_FOUND',
+        policyUrl: window.location.href,
+        rawHtml: document.body.innerHTML,
+        domain: detection.domain,
+      });
       return;
     }
 
-    const urls = await resolvePolicyUrls();
-    if (urls.refundPolicy) {
-      const summary = extractPolicy(urls.refundPolicy);
-      sendMessage({ type: 'POLICY_EXTRACTED', data: summary });
-    } else {
-      sendMessage({ type: 'POLICY_NOT_FOUND', domain: detection.domain });
-    }
+    const urls: PolicyUrls = await resolvePolicyUrls();
+    sendMessage({ type: 'POLICY_URLS_RESOLVED', data: urls, domain: detection.domain });
   } catch (error) {
     logger.error('Content script error:', error);
     sendMessage({
