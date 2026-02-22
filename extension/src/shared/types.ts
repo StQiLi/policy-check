@@ -16,6 +16,7 @@ export interface DetectionResult {
 
 export interface PolicyUrls {
   refundPolicy: string | null;
+  refundPolicyCandidates?: string[];
   shippingPolicy: string | null;
   privacyPolicy: string | null;
   termsOfService: string | null;
@@ -62,9 +63,11 @@ export interface SnapshotPayload {
 export type ExtensionMessage =
   | { type: 'SHOPIFY_DETECTED'; data: DetectionResult }
   | { type: 'POLICY_EXTRACTED'; data: PolicySummary }
+  | { type: 'POLICY_PAGE_FOUND'; policyUrl: string; rawHtml: string; domain: string }
   | { type: 'POLICY_NOT_FOUND'; domain: string }
   | { type: 'POLICY_URLS_RESOLVED'; data: PolicyUrls; domain: string }
   | { type: 'GET_TAB_STATE'; tabId: number }
+  | { type: 'RUN_DETECTION'; tabId: number }
   | { type: 'SAVE_SNAPSHOT'; data: PolicySummary }
   | { type: 'ERROR'; error: string };
 
@@ -73,4 +76,5 @@ export interface TabState {
   summary: PolicySummary | null;
   status: 'idle' | 'detecting' | 'fetching' | 'extracting' | 'done' | 'error';
   fromCache: boolean;
+  errorMessage?: string;
 }

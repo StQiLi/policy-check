@@ -40,6 +40,8 @@ pnpm build
 3. Click the extension icon to open popup
 4. Popup should show detection confidence and policy summary (placeholder for v1)
 
+If the popup shows "Not a Shopify store" on a Shopify site, reload the store page or click **Run detection now**.
+
 ## Project Structure
 
 ```

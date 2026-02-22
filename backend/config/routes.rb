@@ -5,6 +5,9 @@ Rails.application.routes.draw do
   # API routes
   namespace :api do
     namespace :v1 do
+      # AI policy extraction
+      post 'extract', to: 'extract#create'
+
       # Snapshots
       resources :snapshots, only: [:create]
       

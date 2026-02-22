@@ -7,27 +7,32 @@
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <div class="popup-container">
+  <div class="popup-container" id="popup-root" data-state="scanning">
     <header class="header">
       <h1 class="title">Return Clarity</h1>
       <span class="version">v1.0.0</span>
     </header>
 
-    <section id="scanning-state" class="state-section hidden">
+    <section id="scanning-state" class="state-section">
       <div class="spinner"></div>
-      <p class="state-subtext">Analyzing policy...</p>
+      <p class="state-subtext" id="scanning-message">Detecting store...</p>
     </section>
 
-    <section id="not-shopify-state" class="state-section hidden">
+    <section id="not-shopify-state" class="state-section">
       <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
         <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
         <polyline points="9 22 9 12 15 12 15 22"/>
       </svg>
       <p class="state-heading">Not a Shopify Store</p>
       <p class="state-subtext">Visit a Shopify store to see return policy information.</p>
+      <p id="detection-debug" class="debug-line" aria-live="polite"></p>
+      <div id="no-detection-actions" class="debug-actions hidden">
+        <button type="button" id="run-detection-btn" class="btn btn-secondary btn-small">Run detection now</button>
+        <span class="debug-actions-hint">or reload the store page and open the popup again</span>
+      </div>
     </section>
 
-    <section id="policy-not-found-state" class="state-section hidden">
+    <section id="policy-not-found-state" class="state-section">
       <p class="state-heading">Policy Not Found</p>
       <p class="state-subtext">Shopify store detected, but no return policy page was found.</p>
       <p id="not-found-domain" class="state-subtext"></p>

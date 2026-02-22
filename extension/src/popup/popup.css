@@ -21,6 +21,37 @@ body {
   padding: 16px;
 }
 
+/* Only one state visible at a time; controlled by data-state on #popup-root */
+#popup-root #scanning-state,
+#popup-root #not-shopify-state,
+#popup-root #policy-not-found-state,
+#popup-root #detection-status-section,
+#popup-root #policy-summary {
+  display: none;
+}
+#popup-root #policy-link {
+  display: none;
+}
+#popup-root[data-state="scanning"] #scanning-state {
+  display: flex;
+}
+#popup-root[data-state="not-shopify"] #not-shopify-state {
+  display: flex;
+}
+#popup-root[data-state="policy-not-found"] #policy-not-found-state {
+  display: flex;
+}
+#popup-root[data-state="results"] #detection-status-section {
+  display: block;
+}
+#popup-root[data-state="results"] #policy-summary {
+  display: flex;
+  flex-direction: column;
+}
+#popup-root[data-state="results"] #policy-link {
+  display: block;
+}
+
 /* Header */
 .header {
   display: flex;
@@ -217,6 +248,35 @@ body {
   font-size: 12px;
   color: #6b7280;
   line-height: 1.5;
+}
+
+/* Debug line when "Not a Shopify store" — shows detection indicators */
+.debug-line {
+  margin-top: 12px;
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+  color: #9ca3af;
+  line-height: 1.4;
+  word-break: break-word;
+}
+.debug-line:empty {
+  display: none;
+}
+
+.debug-actions {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.debug-actions-hint {
+  font-size: 10px;
+  color: #9ca3af;
+}
+.btn-small {
+  padding: 6px 12px;
+  font-size: 12px;
 }
 
 /* Confidence Dots */

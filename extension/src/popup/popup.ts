@@ -1,4 +1,3 @@
-import { logger } from '../shared/logger';
 import type { ExtensionMessage, TabState, DetectionResult, PolicySummary } from '../shared/types';
 
 // ── DOM references ──────────────────────────────────────────────
@@ -10,12 +9,11 @@ const detectionText         = $<HTMLDivElement>('detection-text');
 const confidenceValueEl     = $<HTMLSpanElement>('confidence-value');
 const cacheBadgeEl          = $<HTMLSpanElement>('cache-badge');
 
-const scanningStateEl       = $<HTMLElement>('scanning-state');
-const notShopifyStateEl     = $<HTMLElement>('not-shopify-state');
-const policyNotFoundStateEl = $<HTMLElement>('policy-not-found-state');
+const popupRoot             = $<HTMLElement>('popup-root');
 const notFoundDomainEl      = $<HTMLElement>('not-found-domain');
-const detectionStatusSectionEl = $<HTMLElement>('detection-status-section');
-const policySummarySectionEl   = $<HTMLElement>('policy-summary');
+const detectionDebugEl      = $<HTMLElement>('detection-debug');
+const noDetectionActionsEl = $<HTMLElement>('no-detection-actions');
+const runDetectionBtn      = $<HTMLButtonElement>('run-detection-btn');
 
 const returnWindowEl   = $<HTMLElement>('return-window');
 const conditionEl      = $<HTMLElement>('condition');
@@ -33,34 +31,80 @@ const policyLinkEl     = $<HTMLAnchorElement>('policy-link');
 const saveSnapshotBtn  = $<HTMLButtonElement>('save-snapshot');
 const viewHistoryBtn   = $<HTMLButtonElement>('view-history');
 const errorMessageEl   = $<HTMLDivElement>('error-message');
+const scanningMessageEl = $<HTMLParagraphElement>('scanning-message');
 
 let currentState: TabState | null = null;
+let pollIntervalId: ReturnType<typeof setInterval> | null = null;
 
-// ── Bootstrap ───────────────────────────────────────────────────
+const POLL_MS = 400;
+const POLL_TIMEOUT_MS = 15000;
 
-async function loadState(): Promise<void> {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) {
-      showError('No active tab found');
+function isPendingStatus(status: TabState['status']): boolean {
+  return status === 'detecting' || status === 'fetching' || status === 'extracting';
+}
+
+/** Poll tab state until we have a final status (done/error) or timeout. */
+function pollForTabState(tabId: number): void {
+  if (pollIntervalId) clearInterval(pollIntervalId);
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+
+  pollIntervalId = setInterval(() => {
+    if (Date.now() > deadline) {
+      if (pollIntervalId) clearInterval(pollIntervalId);
+      pollIntervalId = null;
       return;
     }
+    chrome.runtime.sendMessage(
+      { type: 'GET_TAB_STATE', tabId } as ExtensionMessage,
+      (response: { state?: TabState }) => {
+        if (chrome.runtime.lastError) return;
+        const state = response?.state ?? null;
+        const status = (state as TabState | null)?.status ?? 'done';
+        if (isPendingStatus(status)) {
+          setScanningMessage(status as 'detecting' | 'fetching' | 'extracting');
+        } else {
+          if (pollIntervalId) clearInterval(pollIntervalId);
+          pollIntervalId = null;
+          currentState = state;
+          renderState(currentState);
+        }
+      },
+    );
+  }, POLL_MS);
+}
 
-    const message: ExtensionMessage = { type: 'GET_TAB_STATE', tabId: tab.id };
-
-    chrome.runtime.sendMessage(message, (response) => {
-      if (chrome.runtime.lastError) {
-        logger.error('Failed to get tab state:', chrome.runtime.lastError);
-        showError('Failed to load data');
-        return;
-      }
-      currentState = response.state as TabState;
-      renderState(currentState);
-    });
-  } catch (err) {
-    logger.error('loadState failed:', err);
-    showError('Failed to load data');
-  }
+/** Run detection on the active tab and render the result. Used on popup open and by "Run detection" button. */
+function runDetection(callback?: () => void): void {
+  chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+    if (!tab?.id) {
+      showError('No active tab found');
+      showState('not-shopify');
+      renderDetectionDebug(null);
+      callback?.();
+      return;
+    }
+    setScanningMessage('detecting');
+    showState('scanning');
+    chrome.runtime.sendMessage(
+      { type: 'RUN_DETECTION', tabId: tab.id } as ExtensionMessage,
+      (response: { state?: TabState; injectError?: string }) => {
+        if (chrome.runtime.lastError) {
+          showError('Detection failed. Reload the store page and try again.');
+          showState('not-shopify');
+          renderDetectionDebug(null);
+          callback?.();
+          return;
+        }
+        currentState = response?.state ?? null;
+        if (response?.injectError) showError(response.injectError);
+        renderState(currentState);
+        if (tab.id && currentState && isPendingStatus((currentState as TabState).status)) {
+          pollForTabState(tab.id);
+        }
+        callback?.();
+      },
+    );
+  });
 }
 
 // ── UI state ────────────────────────────────────────────────────
@@ -68,23 +112,26 @@ async function loadState(): Promise<void> {
 type UIState = 'scanning' | 'not-shopify' | 'policy-not-found' | 'results';
 
 function showState(state: UIState): void {
-  scanningStateEl.classList.add('hidden');
-  notShopifyStateEl.classList.add('hidden');
-  policyNotFoundStateEl.classList.add('hidden');
-  detectionStatusSectionEl.classList.add('hidden');
-  policySummarySectionEl.classList.add('hidden');
-  policyLinkEl.classList.add('hidden');
+  popupRoot?.setAttribute('data-state', state);
+}
 
-  if (state === 'scanning') {
-    scanningStateEl.classList.remove('hidden');
-  } else if (state === 'not-shopify') {
-    notShopifyStateEl.classList.remove('hidden');
-  } else if (state === 'policy-not-found') {
-    policyNotFoundStateEl.classList.remove('hidden');
-  } else {
-    detectionStatusSectionEl.classList.remove('hidden');
-    policySummarySectionEl.classList.remove('hidden');
+function setScanningMessage(status: 'detecting' | 'fetching' | 'extracting'): void {
+  if (!scanningMessageEl) return;
+  scanningMessageEl.textContent =
+    status === 'detecting' ? 'Detecting store...' : 'Analyzing policy...';
+}
+
+function renderDetectionDebug(detection: DetectionResult | null): void {
+  if (!detectionDebugEl) return;
+  if (noDetectionActionsEl) noDetectionActionsEl.classList.add('hidden');
+  if (!detection) {
+    detectionDebugEl.textContent = 'Reload the store page or use Run detection now.';
+    detectionDebugEl.classList.remove('hidden');
+    noDetectionActionsEl?.classList.remove('hidden');
+    return;
   }
+  detectionDebugEl.textContent = '';
+  detectionDebugEl.classList.add('hidden');
 }
 
 // ── Renderers ───────────────────────────────────────────────────
@@ -94,13 +141,14 @@ function renderState(state: TabState | null): void {
   const fromCache = (state as any)?.fromCache ?? false;
 
   if (status === 'detecting' || status === 'fetching' || status === 'extracting') {
+    setScanningMessage(status);
     showState('scanning');
     saveSnapshotBtn.disabled = true;
     return;
   }
 
   if (status === 'error') {
-    showError((state as any)?.errorMessage ?? 'An error occurred');
+    showError(state?.errorMessage ?? 'An error occurred');
     showState('not-shopify');
     saveSnapshotBtn.disabled = true;
     return;
@@ -108,6 +156,7 @@ function renderState(state: TabState | null): void {
 
   if (!state || !state.detection || !state.detection.isShopify) {
     showState('not-shopify');
+    renderDetectionDebug(state?.detection ?? null);
     saveSnapshotBtn.disabled = true;
     return;
   }
@@ -205,4 +254,11 @@ function showError(message: string): void {
 
 saveSnapshotBtn.addEventListener('click', handleSaveSnapshot);
 viewHistoryBtn.addEventListener('click', handleViewHistory);
-loadState();
+runDetectionBtn?.addEventListener('click', handleRunDetection);
+
+showState('scanning');
+runDetection();
+
+function handleRunDetection(): void {
+  runDetection();
+}

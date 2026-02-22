@@ -12,13 +12,53 @@ type ExtractResult = {
 
 // ── HTML stripping ───────────────────────────────────────────────
 
+/**
+ * Shopify policy pages use known content containers. Try to extract
+ * just the policy body before falling back to full-page stripping.
+ */
+const CONTENT_SELECTORS = [
+  '.shopify-policy__body',
+  '.shopify-policy__container',
+  '.rte',
+  '[data-policy-body]',
+  'article',
+  'main .page-content',
+  'main',
+];
+
+function extractContentFromContainer(html: string): string | null {
+  if (typeof DOMParser === 'undefined') return null;
+
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+
+    for (const selector of CONTENT_SELECTORS) {
+      const el = doc.querySelector(selector);
+      if (el && el.textContent && el.textContent.trim().length > 100) {
+        return el.innerHTML;
+      }
+    }
+  } catch {
+    // DOMParser not available (e.g. service worker context)
+  }
+
+  return null;
+}
+
 export function stripHtmlToText(html: string): string {
-  let text = html
+  const contentHtml = extractContentFromContainer(html) ?? html;
+
+  let text = contentHtml
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, '')
     .replace(/<nav[\s\S]*?<\/nav>/gi, '')
     .replace(/<header[\s\S]*?<\/header>/gi, '')
-    .replace(/<footer[\s\S]*?<\/footer>/gi, '');
+    .replace(/<footer[\s\S]*?<\/footer>/gi, '')
+    .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
+    .replace(/<svg[\s\S]*?<\/svg>/gi, '')
+    // Chat widgets, cookie banners, and other overlays
+    .replace(/<div[^>]*(?:chat|livechat|intercom|drift|zendesk|tawk|crisp|cookie|consent|banner|popup|modal|overlay)[^>]*>[\s\S]*?<\/div>/gi, '');
 
   text = text
     .replace(/<br\s*\/?>/gi, '\n')

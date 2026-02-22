@@ -5,7 +5,6 @@
 
 import { detectShopify } from './shared/shopifyDetect';
 import { resolvePolicyUrls, isPolicyPage } from './shared/policyResolver';
-import { extractPolicy } from './shared/extract';
 import { logger } from './shared/logger';
 import type { ExtensionMessage, PolicyUrls } from './shared/types';
 
@@ -26,14 +25,17 @@ async function run(): Promise<void> {
   try {
     const detection = detectShopify();
 
-    if (!detection.isShopify) return;
-
-    logger.info('Shopify store detected:', detection.domain, `(${detection.confidence}%)`);
     sendMessage({ type: 'SHOPIFY_DETECTED', data: detection });
 
+    if (!detection.isShopify) return;
+
     if (isPolicyPage()) {
-      const summary = extractPolicy(window.location.href);
-      sendMessage({ type: 'POLICY_EXTRACTED', data: summary });
+      sendMessage({
+        type: 'POLICY_PAGE_FOUND',
+        policyUrl: window.location.href,
+        rawHtml: document.body.innerHTML,
+        domain: detection.domain,
+      });
       return;
     }
 

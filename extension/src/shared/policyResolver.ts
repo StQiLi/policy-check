@@ -13,6 +13,10 @@ const CANONICAL_PATHS: Record<string, string> = {
   subscription: '/policies/subscription-policy',
 };
 
+const ALTERNATE_PATHS: Record<string, string[]> = {
+  refund: ['/pages/returnpolicy', '/pages/refund-policy', '/pages/return-policy'],
+};
+
 /**
  * Build candidate policy URLs for the current store.
  *
@@ -23,18 +27,29 @@ const CANONICAL_PATHS: Record<string, string> = {
 export async function resolvePolicyUrls(): Promise<PolicyUrls> {
   const base = window.location.origin;
 
-  const refundPolicy = buildCanonicalUrl(base, 'refund') ?? findPolicyInFooter(['return', 'refund']);
+  const refundPolicy =
+    buildCanonicalUrl(base, 'refund') ?? findPolicyInFooter(['return', 'refund']);
+  const refundPolicyCandidates = buildCandidateUrls(base, 'refund');
   const shippingPolicy =
     buildCanonicalUrl(base, 'shipping') ?? findPolicyInFooter(['shipping', 'delivery']);
   const privacyPolicy = buildCanonicalUrl(base, 'privacy');
   const termsOfService = buildCanonicalUrl(base, 'terms');
 
-  return { refundPolicy, shippingPolicy, privacyPolicy, termsOfService };
+  return { refundPolicy, refundPolicyCandidates, shippingPolicy, privacyPolicy, termsOfService };
 }
 
 function buildCanonicalUrl(base: string, key: string): string | null {
   const path = CANONICAL_PATHS[key];
   return path ? `${base}${path}` : null;
+}
+
+function buildCandidateUrls(base: string, key: string): string[] {
+  const candidates: string[] = [];
+  const canonical = CANONICAL_PATHS[key];
+  if (canonical) candidates.push(`${base}${canonical}`);
+  const alternates = ALTERNATE_PATHS[key];
+  if (alternates) candidates.push(...alternates.map((p) => `${base}${p}`));
+  return candidates;
 }
 
 /**
@@ -72,6 +87,7 @@ export function isPolicyPage(): boolean {
   return (
     path.includes('/policies/') ||
     path.includes('/pages/return') ||
+    path.includes('/pages/returnpolicy') ||
     path.includes('/pages/refund') ||
     path.includes('/pages/shipping')
   );

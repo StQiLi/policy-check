@@ -5,14 +5,32 @@
  */
 
 import { logger } from './shared/logger';
-import { extractPolicyFromText, stripHtmlToText } from './shared/extract';
-import { getCachedSummary, setCachedSummary } from './shared/cache';
+import { stripHtmlToText } from './shared/extract';
+// TODO: re-enable caching after testing
+// import { getCachedSummary, setCachedSummary } from './shared/cache';
 import { getPolicyType } from './shared/policyResolver';
-import type { ExtensionMessage, TabState, DetectionResult, PolicySummary, PolicyUrls } from './shared/types';
+import type {
+  ExtensionMessage,
+  TabState,
+  DetectionResult,
+  PolicySummary,
+  PolicyFields,
+  PolicyConfidence,
+  PolicyUrls,
+} from './shared/types';
 
 // ── Per-tab state (lost on service-worker restart) ──────────────
 
 const tabStates = new Map<number, TabState>();
+
+// When popup requests "Run detection", we inject the content script and resolve when we get SHOPIFY_DETECTED (or timeout)
+const pendingRunDetection = new Map<
+  number,
+  {
+    resolve: (r: { state: TabState; injectError?: string }) => void;
+    timeoutId: ReturnType<typeof setTimeout>;
+  }
+>();
 
 // ── API config ──────────────────────────────────────────────────
 
@@ -26,15 +44,41 @@ chrome.runtime.onMessage.addListener(
     const tabId = sender.tab?.id;
 
     switch (message.type) {
-      case 'SHOPIFY_DETECTED':
-        handleShopifyDetected(message.data, tabId);
+      case 'SHOPIFY_DETECTED': {
+        let resolvedTabId = tabId ?? (message as { tabId?: number }).tabId;
+        if (resolvedTabId == null && pendingRunDetection.size === 1) {
+          resolvedTabId = pendingRunDetection.keys().next().value;
+        }
+        handleShopifyDetected(message.data, resolvedTabId);
+        if (resolvedTabId) {
+          const pending = pendingRunDetection.get(resolvedTabId);
+          if (pending) {
+            pendingRunDetection.delete(resolvedTabId);
+            clearTimeout(pending.timeoutId);
+            pending.resolve({ state: tabStates.get(resolvedTabId)! });
+          }
+        }
         sendResponse({ success: true });
         return false;
+      }
 
       case 'POLICY_EXTRACTED':
         handlePolicyExtracted(message.data, tabId);
         sendResponse({ success: true });
         return false;
+
+      case 'POLICY_PAGE_FOUND':
+        handlePolicyPageFound(message.rawHtml, message.policyUrl, message.domain, tabId)
+          .then(() => sendResponse({ success: true }))
+          .catch((err: Error) => {
+            logger.error('Policy page extraction failed:', err);
+            if (tabId) {
+              const cur = tabStates.get(tabId) ?? { detection: null, summary: null, status: 'idle' as const, fromCache: false };
+              tabStates.set(tabId, { ...cur, status: 'error', errorMessage: err.message });
+            }
+            sendResponse({ success: false, error: err.message });
+          });
+        return true;
 
       case 'POLICY_NOT_FOUND':
         handlePolicyNotFound(message.domain, tabId);
@@ -47,6 +91,50 @@ chrome.runtime.onMessage.addListener(
         return false;
       }
 
+      case 'RUN_DETECTION': {
+        const runTabId = message.tabId;
+        const emptyState: TabState = {
+          detection: null,
+          summary: null,
+          status: 'idle',
+          fromCache: false,
+        };
+        const send = (state: TabState, injectError?: string) => sendResponse({ state, injectError });
+        const resolveWith = (state: TabState, injectError?: string) => {
+          const entry = pendingRunDetection.get(runTabId);
+          if (!entry) return;
+          pendingRunDetection.delete(runTabId);
+          clearTimeout(entry.timeoutId);
+          entry.resolve({ state, injectError });
+        };
+
+        chrome.tabs
+          .get(runTabId)
+          .then((tab) => {
+            const url = tab?.url ?? '';
+            if (!url || url.startsWith('chrome://') || url.startsWith('edge://') || (!url.startsWith('http://') && !url.startsWith('https://'))) {
+              send(emptyState, 'Open a store page (e.g. allbirds.ca) in this tab.');
+              return;
+            }
+            const timeoutId = setTimeout(() => {
+              resolveWith(tabStates.get(runTabId) ?? emptyState);
+            }, 4000);
+            pendingRunDetection.set(runTabId, {
+              resolve: (r) => sendResponse(r),
+              timeoutId,
+            });
+            chrome.scripting
+              .executeScript({ target: { tabId: runTabId }, files: ['content.js'] })
+              .catch((err: Error) => {
+                resolveWith(emptyState, err?.message ?? 'Inject failed');
+              });
+          })
+          .catch(() => {
+            send(emptyState, 'Tab not found');
+          });
+        return true;
+      }
+
       case 'POLICY_URLS_RESOLVED':
         handlePolicyUrlsResolved(message.data, message.domain, tabId)
           .then(() => sendResponse({ success: true }))
@@ -54,7 +142,7 @@ chrome.runtime.onMessage.addListener(
             logger.error('Policy fetch failed:', err);
             if (tabId) {
               const cur = tabStates.get(tabId) ?? { detection: null, summary: null, status: 'idle' as const, fromCache: false };
-              tabStates.set(tabId, { ...cur, status: 'error' });
+              tabStates.set(tabId, { ...cur, status: 'error', errorMessage: err.message });
             }
             sendResponse({ success: false, error: err.message });
           });
@@ -112,6 +200,23 @@ function handlePolicyNotFound(domain: string, tabId?: number): void {
   }
 }
 
+async function handlePolicyPageFound(
+  rawHtml: string,
+  policyUrl: string,
+  domain: string,
+  tabId?: number,
+): Promise<void> {
+  if (!tabId) return;
+
+  const current = tabStates.get(tabId) ?? { detection: null, summary: null, status: 'idle' as const, fromCache: false };
+  tabStates.set(tabId, { ...current, status: 'extracting' });
+
+  const text = stripHtmlToText(rawHtml);
+  const summary = await buildSummary(text, policyUrl, domain);
+
+  tabStates.set(tabId, { ...tabStates.get(tabId)!, summary, status: 'done', fromCache: false });
+}
+
 async function handlePolicyUrlsResolved(
   urls: PolicyUrls,
   domain: string,
@@ -122,27 +227,89 @@ async function handlePolicyUrlsResolved(
   const current = tabStates.get(tabId) ?? { detection: null, summary: null, status: 'idle' as const, fromCache: false };
   tabStates.set(tabId, { ...current, status: 'fetching' });
 
-  const cached = await getCachedSummary(domain);
-  if (cached) {
-    tabStates.set(tabId, { ...current, summary: cached, status: 'done', fromCache: true });
-    logger.debug('Cache hit for', domain);
-    return;
-  }
-
-  const policyUrl = urls.refundPolicy ?? urls.shippingPolicy;
-  if (!policyUrl) {
+  const candidates = urls.refundPolicyCandidates ?? (urls.refundPolicy ? [urls.refundPolicy] : []);
+  if (candidates.length === 0 && !urls.shippingPolicy) {
     tabStates.set(tabId, { ...current, status: 'done', fromCache: false });
     return;
   }
 
   tabStates.set(tabId, { ...tabStates.get(tabId)!, status: 'extracting' });
-  const html = await fetchPolicyHtml(policyUrl);
-  const text = stripHtmlToText(html);
-  const summary = extractPolicyFromText(text, policyUrl, domain);
 
-  await setCachedSummary(domain, summary);
+  const result = await fetchFirstValidPolicy(candidates);
+  if (!result && urls.shippingPolicy) {
+    const shippingHtml = await fetchPolicyHtml(urls.shippingPolicy);
+    const text = stripHtmlToText(shippingHtml);
+    const summary = await buildSummary(text, urls.shippingPolicy, domain);
+    tabStates.set(tabId, { ...tabStates.get(tabId)!, summary, status: 'done', fromCache: false });
+    return;
+  }
+
+  if (!result) {
+    tabStates.set(tabId, { ...tabStates.get(tabId)!, status: 'done', fromCache: false });
+    return;
+  }
+
+  const text = stripHtmlToText(result.html);
+  const summary = await buildSummary(text, result.url, domain);
   tabStates.set(tabId, { ...tabStates.get(tabId)!, summary, status: 'done', fromCache: false });
-  logger.debug('Policy extracted and cached for', domain);
+}
+
+// ── AI extraction ───────────────────────────────────────────────
+
+async function buildSummary(
+  text: string,
+  policyUrl: string,
+  domain: string,
+): Promise<PolicySummary> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/extract`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text.slice(0, 8000), domain }),
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(
+        (body as { error?: { message?: string } })?.error?.message ??
+          `Extract API responded with ${response.status}`
+      );
+    }
+
+    const data = (await response.json()) as {
+      fields: PolicyFields;
+      confidence: PolicyConfidence;
+    };
+
+    return {
+      storeDomain: domain,
+      policyUrl,
+      extractedAt: new Date().toISOString(),
+      fields: data.fields,
+      confidence: data.confidence,
+      rawTextSnippet: text.slice(0, 500),
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function fetchFirstValidPolicy(
+  candidates: string[],
+): Promise<{ url: string; html: string } | null> {
+  for (const url of candidates) {
+    try {
+      const html = await fetchPolicyHtml(url);
+      return { url, html };
+    } catch {
+      logger.debug('Candidate URL failed, trying next:', url);
+    }
+  }
+  return null;
 }
 
 async function fetchPolicyHtml(url: string): Promise<string> {

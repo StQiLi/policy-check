@@ -5,8 +5,8 @@
   "description": "Chrome extension that extracts and displays return policy summaries for Shopify stores",
   "type": "module",
   "scripts": {
-    "dev": "vite build --watch --mode development",
-    "build": "tsc --noEmit && vite build && node scripts/postbuild.js",
+    "dev": "vite build --config vite.content.config.ts && node scripts/postbuild.js && KEEP_DIST=1 vite build --watch --mode development",
+    "build": "tsc --noEmit && vite build && node scripts/postbuild.js && vite build --config vite.content.config.ts",
     "postbuild": "node scripts/postbuild.js",
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
