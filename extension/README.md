@@ -33,12 +33,19 @@ pnpm build
 4. Select the `extension/dist/` folder
 5. The extension should now appear in your extensions list
 
+### Set auth token (required for Save Snapshot and View History)
+
+1. In the backend, run `rails db:seed` to create a dev user and print a token (e.g. `dev-token-for-local-testing`).
+2. In Chrome, right‑click the extension icon → **Options** (or click **Options (set auth token)** in the popup footer).
+3. Paste the token and click **Save**.
+
 ### Testing
 
 1. Visit a Shopify store (e.g., `https://example.myshopify.com`)
 2. Extension badge should turn green with "RC" text
 3. Click the extension icon to open popup
 4. Popup should show detection confidence and policy summary (placeholder for v1)
+5. Click **View History** to open the full Snapshot Hub page in a new tab
 
 If the popup shows "Not a Shopify store" on a Shopify site, reload the store page or click **Run detection now**.
 
@@ -53,6 +60,10 @@ extension/
 ├── src/
 │   ├── content.ts         # Content script (runs on all pages)
 │   ├── background.ts      # Service worker
+│   ├── hub/
+│   │   ├── index.html     # Snapshot hub page
+│   │   ├── hub.ts         # Hub logic (fetch/render/filter/paginate)
+│   │   └── hub.css        # Hub styles
 │   ├── popup/
 │   │   ├── index.html     # Popup HTML
 │   │   ├── popup.ts       # Popup logic
@@ -88,7 +99,8 @@ extension/
   - Return shipping responsibility
   - Exclusions
 - **Popup UI**: Displays detection confidence and policy summary
-- **Optional Backend Sync**: Save snapshots to Rails API (opt-in)
+- **Snapshot Hub**: View saved snapshots with expiration badges and product/policy links
+- **Optional Backend Sync**: Save snapshots (with active tab page URL) to Rails API
 
 ## Development Notes
 

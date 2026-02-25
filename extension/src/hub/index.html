@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Return Clarity - Snapshot Hub</title>
+  <link rel="stylesheet" href="../shared/tokens.css">
+  <link rel="stylesheet" href="hub.css">
+</head>
+<body>
+  <main id="hub-root" class="hub" data-state="loading" data-view="grid">
+    <header class="hub-header">
+      <div class="hero-copy">
+        <p class="kicker">Return Clarity</p>
+        <h1>Snapshot Hub</h1>
+        <p id="snapshot-count" class="muted">Loading snapshots...</p>
+      </div>
+
+      <div class="controls">
+        <label>
+          Store
+          <input id="store-filter" type="search" placeholder="Search by store domain">
+        </label>
+
+        <label>
+          Status
+          <select id="status-filter">
+            <option value="all">All statuses</option>
+            <option value="active">Active</option>
+            <option value="expiring">Expiring soon</option>
+            <option value="expired">Expired</option>
+          </select>
+        </label>
+
+        <label>
+          Policy Type
+          <select id="policy-type-filter">
+            <option value="all">All types</option>
+            <option value="refund">Refund</option>
+            <option value="shipping">Shipping</option>
+            <option value="privacy">Privacy</option>
+            <option value="terms">Terms</option>
+            <option value="subscription">Subscription</option>
+            <option value="unknown">Unknown</option>
+          </select>
+        </label>
+
+        <label>
+          Sort
+          <select id="sort-filter">
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="window">Longest return window</option>
+            <option value="store">Store A-Z</option>
+          </select>
+        </label>
+
+        <div class="view-toggle" role="group" aria-label="Toggle card view">
+          <button id="view-grid" type="button" class="toggle-btn" aria-pressed="true" title="Grid view">Grid</button>
+          <button id="view-list" type="button" class="toggle-btn" aria-pressed="false" title="List view">List</button>
+        </div>
+      </div>
+    </header>
+
+    <section id="loading-state" class="state-card">
+      <p>Loading snapshots...</p>
+      <div class="skeleton-grid" aria-hidden="true">
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+      </div>
+    </section>
+
+    <section id="error-state" class="state-card">
+      <p id="error-text">Unable to load snapshots.</p>
+      <button id="retry-btn" type="button" class="retry-btn">Retry</button>
+    </section>
+
+    <section id="empty-state" class="state-card">
+      <p>No snapshots yet. Save snapshots from the popup while browsing stores.</p>
+    </section>
+
+    <section id="results-state" class="results">
+      <p id="no-matches" class="muted hidden">No snapshots match the active filters.</p>
+      <div id="snapshot-grid" class="snapshot-grid"></div>
+      <button id="load-more-btn" class="load-more-btn" type="button">Load more</button>
+    </section>
+  </main>
+
+  <script type="module" src="hub.ts"></script>
+</body>
+</html>

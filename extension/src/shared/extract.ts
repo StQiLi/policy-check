@@ -12,6 +12,67 @@ type ExtractResult = {
   confidence: ConfidenceLevel;
 };
 
+const MAX_TEXT_LENGTH = 50_000;
+const API_TEXT_LIMIT = 12_000;
+const SENTENCE_SPLIT_REGEX = /(?<=[.!?])\s+/;
+const FIELD_ANCHORS = /\b(return|refund|exchange|shipping|policy|eligible|items?)\b/;
+const NEGATIVE_RETURN_PATTERNS = [
+  /\bno\s+returns?\b/,
+  /\ball\s+sales?\s+are\s+final\b/,
+  /\bfinal\s+sale\s+items?\s+cannot\s+be\s+returned\b/,
+  /\bnon[- ]?returnable\b/,
+];
+
+function stripTagsToText(html: string): string {
+  const withoutScripts = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ');
+
+  const text = withoutScripts
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ');
+
+  return text
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>');
+}
+
+function normalizeText(text: string): string {
+  return text
+    .replace(/\r/g, '\n')
+    .replace(/\t/g, ' ')
+    .replace(/[ ]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\u00a0/g, ' ')
+    .trim();
+}
+
+export function compactPolicyTextForApi(text: string): string {
+  return normalizeText(text).slice(0, API_TEXT_LIMIT);
+}
+
+export function scorePolicyTextQuality(text: string): number {
+  const lower = text.toLowerCase();
+  const lengthScore = Math.min(4, Math.floor(lower.length / 500));
+  const keywordHits = [
+    'return',
+    'refund',
+    'exchange',
+    'shipping',
+    'policy',
+    'final sale',
+  ].filter((keyword) => lower.includes(keyword)).length;
+
+  return Math.min(10, lengthScore + keywordHits);
+}
+
 // ── HTML stripping ───────────────────────────────────────────────
 
 /**

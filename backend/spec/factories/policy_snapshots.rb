@@ -4,10 +4,12 @@ FactoryBot.define do
     association :user
     policy_type { 'refund' }
     sequence(:policy_url) { |n| "https://store#{n}.myshopify.com/policies/refund-policy" }
+    sequence(:page_url) { |n| "https://store#{n}.myshopify.com/products/item-#{n}" }
     summary do
+      unique_suffix = SecureRandom.hex(2)
       {
         'fields' => {
-          'returnWindow' => '30 days',
+          'returnWindow' => "30 days #{unique_suffix}",
           'conditionRequirements' => 'Unworn with tags',
           'fees' => 'No restocking fee',
           'returnShipping' => 'Customer pays',

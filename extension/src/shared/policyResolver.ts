@@ -16,6 +16,9 @@ const CANONICAL_PATHS: Record<string, string> = {
 const ALTERNATE_PATHS: Record<string, string[]> = {
   refund: ['/pages/returnpolicy', '/pages/refund-policy', '/pages/return-policy'],
 };
+const REFUND_TEXT_KEYWORDS = ['return', 'refund', 'exchange', 'returns'];
+const REFUND_PATH_KEYWORDS = ['/policies/refund', '/return', '/refund', 'help-center'];
+const REFUND_NEGATIVE_KEYWORDS = ['privacy', 'terms', 'shipping', 'faq', 'contact'];
 
 /**
  * Build candidate policy URLs for the current store.
@@ -26,10 +29,13 @@ const ALTERNATE_PATHS: Record<string, string[]> = {
  */
 export async function resolvePolicyUrls(): Promise<PolicyUrls> {
   const base = window.location.origin;
+  const footerRefundCandidates = findRefundCandidatesInFooter().flatMap((url) =>
+    expandHelpCenterRefundCandidates(url)
+  );
+  const canonicalCandidates = buildCandidateUrls(base, 'refund');
+  const refundPolicyCandidates = dedupeUrls([...canonicalCandidates, ...footerRefundCandidates]);
 
-  const refundPolicy =
-    buildCanonicalUrl(base, 'refund') ?? findPolicyInFooter(['return', 'refund']);
-  const refundPolicyCandidates = buildCandidateUrls(base, 'refund');
+  const refundPolicy = refundPolicyCandidates[0] ?? null;
   const shippingPolicy =
     buildCanonicalUrl(base, 'shipping') ?? findPolicyInFooter(['shipping', 'delivery']);
   const privacyPolicy = buildCanonicalUrl(base, 'privacy');
@@ -50,6 +56,14 @@ function buildCandidateUrls(base: string, key: string): string[] {
   const alternates = ALTERNATE_PATHS[key];
   if (alternates) candidates.push(...alternates.map((p) => `${base}${p}`));
   return candidates;
+}
+
+function dedupeUrls(urls: string[]): string[] {
+  return Array.from(new Set(urls));
+}
+
+function findPolicyInFooter(includeKeywords: string[], avoidKeywords: string[] = []): string | null {
+  return findBestFooterLink(includeKeywords, avoidKeywords);
 }
 
 /**
@@ -178,7 +192,6 @@ function expandHelpCenterRefundCandidates(url: string): string[] {
  */
 export function isPolicyPage(): boolean {
   const path = window.location.pathname.toLowerCase();
-  const search = window.location.search.toLowerCase();
   return (
     path.includes('/policies/') ||
     path.includes('/pages/return') ||

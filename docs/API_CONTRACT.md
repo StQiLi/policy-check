@@ -84,6 +84,7 @@ Authorization: Bearer <token>
 {
   "store_domain": "example.myshopify.com",
   "policy_url": "https://example.myshopify.com/policies/refund-policy",
+  "page_url": "https://example.myshopify.com/products/crewneck-sweater",
   "policy_type": "refund",
   "summary": {
     "fields": {
@@ -115,6 +116,7 @@ Authorization: Bearer <token>
   "status": "saved",
   "store_domain": "example.myshopify.com",
   "policy_url": "https://example.myshopify.com/policies/refund-policy",
+  "page_url": "https://example.myshopify.com/products/crewneck-sweater",
   "extracted_at": "2026-02-17T10:30:00Z",
   "checksum": "a3f8b9c2d1e4f5a6b7c8d9e0f1a2b3c4",
   "created_at": "2026-02-17T10:30:15Z"
@@ -150,7 +152,72 @@ Authorization: Bearer <token>
 
 ---
 
-### 2. GET `/api/v1/stores/:domain/latest`
+### 2. GET `/api/v1/snapshots`
+
+**Purpose:** Retrieve all snapshots saved by the authenticated user (paginated).
+
+#### Request
+
+**URL:** `/api/v1/snapshots?page=1&per_page=10&policy_type=refund&store_domain=example.myshopify.com`
+
+**Headers:**
+```http
+Authorization: Bearer <token>
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | integer | 1 | Page number (1-indexed) |
+| `per_page` | integer | 10 | Items per page (max 100) |
+| `policy_type` | string | all | Optional policy type filter |
+| `store_domain` | string | all | Optional store domain filter |
+
+#### Response (200 OK)
+
+```json
+{
+  "snapshots": [
+    {
+      "id": 125,
+      "store": {
+        "domain": "example.myshopify.com",
+        "name": "Example Store",
+        "platform": "shopify"
+      },
+      "policy_url": "https://example.myshopify.com/policies/refund-policy",
+      "page_url": "https://example.myshopify.com/products/crewneck-sweater",
+      "policy_type": "refund",
+      "summary": { /* ... */ },
+      "extracted_at": "2026-02-17T10:30:00Z",
+      "created_at": "2026-02-17T10:30:15Z"
+    }
+  ],
+  "pagination": {
+    "current_page": 1,
+    "total_pages": 3,
+    "total_count": 25,
+    "per_page": 10
+  }
+}
+```
+
+#### Error Responses
+
+**401 Unauthorized**
+```json
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Invalid or missing authentication token"
+  }
+}
+```
+
+---
+
+### 3. GET `/api/v1/stores/:domain/latest`
 
 **Purpose:** Retrieve the most recent snapshot for a store.
 
@@ -210,7 +277,7 @@ Authorization: Bearer <token>
 
 ---
 
-### 3. GET `/api/v1/stores/:domain/history`
+### 4. GET `/api/v1/stores/:domain/history`
 
 **Purpose:** Retrieve all snapshots for a store (paginated).
 
@@ -283,7 +350,7 @@ Authorization: Bearer <token>
 
 ---
 
-### 4. POST `/api/v1/feedback`
+### 5. POST `/api/v1/feedback`
 
 **Purpose:** Submit user feedback on extraction accuracy.
 
@@ -398,14 +465,12 @@ All paginated endpoints follow this format:
 **Response:**
 ```json
 {
-  "data": [ /* ... */ ],
+  "snapshots": [ /* ... */ ],
   "pagination": {
     "current_page": 2,
     "total_pages": 5,
     "total_count": 87,
-    "per_page": 20,
-    "prev_page": 1,
-    "next_page": 3
+    "per_page": 20
   }
 }
 ```
@@ -451,6 +516,7 @@ All paginated endpoints follow this format:
   "user_id": "integer (FK)",
   "policy_type": "refund | shipping | privacy | terms | subscription",
   "policy_url": "string (URL)",
+  "page_url": "string (URL) | null",
   "summary": "JSONB (PolicySummary)",
   "raw_text_snippet": "string (first 500 chars)",
   "checksum": "string (SHA256)",
@@ -495,6 +561,6 @@ Public shareable policy card (no auth required)
 
 ### v1.0.0 (2026-02-17)
 - Initial API specification
-- 4 core endpoints: snapshots, latest, history, feedback
+- 5 core endpoints: create snapshot, user snapshots index, latest, history, feedback
 - Token-based auth placeholder
 - JSONB for policy summaries

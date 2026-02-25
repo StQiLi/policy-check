@@ -123,9 +123,10 @@ Returns server status (no auth required).
 ### Snapshots
 ```
 POST /api/v1/snapshots
+GET /api/v1/snapshots
 ```
 
-Save a policy snapshot. Requires auth token.
+Save a policy snapshot or list all snapshots for the authenticated user. Requires auth token.
 
 ### Stores
 ```
@@ -160,6 +161,7 @@ See [docs/API_CONTRACT.md](../docs/API_CONTRACT.md) for full API documentation.
 - `user_id` (FK → users)
 - `policy_type` (string: refund, shipping, privacy, terms, subscription)
 - `policy_url` (string)
+- `page_url` (string, nullable, saved page URL from extension)
 - `summary` (jsonb)
 - `raw_text_snippet` (text)
 - `extracted_at` (datetime)

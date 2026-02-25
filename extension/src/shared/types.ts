@@ -41,10 +41,43 @@ export interface PolicyConfidence {
 export interface PolicySummary {
   storeDomain: string;
   policyUrl: string;
+  pageUrl?: string;
   extractedAt: string; // ISO timestamp
   fields: PolicyFields;
   confidence: PolicyConfidence;
   rawTextSnippet: string; // First 500 chars
+}
+
+export interface SnapshotStore {
+  domain: string;
+  name: string | null;
+  platform: string;
+}
+
+export interface SnapshotRecord {
+  id: number;
+  store: SnapshotStore;
+  policy_url: string;
+  page_url: string | null;
+  policy_type: string;
+  summary: {
+    fields: PolicyFields;
+    confidence: PolicyConfidence;
+  };
+  extracted_at: string;
+  created_at: string;
+}
+
+export interface SnapshotPagination {
+  current_page: number;
+  total_pages: number;
+  total_count: number;
+  per_page: number;
+}
+
+export interface SnapshotsIndexResponse {
+  snapshots: SnapshotRecord[];
+  pagination: SnapshotPagination;
 }
 
 export interface SnapshotPayload {

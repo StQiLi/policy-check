@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Return Clarity - Options</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="options-root">
+    <h1>Return Clarity - Options</h1>
+
+    <section class="options-section">
+      <h2>API authentication</h2>
+      <p class="muted">Save snapshots and view history require an auth token from the backend.</p>
+      <label class="options-label">
+        Auth token
+        <input id="auth-token" type="password" placeholder="Paste your token here" autocomplete="off">
+      </label>
+      <p id="options-status" class="status hidden" aria-live="polite"></p>
+      <button type="button" id="save-options" class="btn btn-primary">Save</button>
+    </section>
+
+    <section class="options-section muted">
+      <p><strong>How to get a token</strong></p>
+      <p>For local development: run <code>rails db:seed</code> in the backend, then use the printed token (e.g. <code>dev-token-for-local-testing</code>).</p>
+      <p>For production: obtain a token from your Return Clarity account or API provider.</p>
+    </section>
+  </main>
+  <script src="options.ts" type="module"></script>
+</body>
+</html>

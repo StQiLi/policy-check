@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_02_17_000004) do
+ActiveRecord::Schema[7.2].define(version: 2026_02_25_000005) do
   create_table "feedbacks", force: :cascade do |t|
     t.integer "policy_snapshot_id", null: false
     t.integer "user_id", null: false
@@ -36,6 +36,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_02_17_000004) do
     t.string "checksum", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "page_url"
     t.index ["checksum"], name: "index_policy_snapshots_on_checksum"
     t.index ["extracted_at"], name: "index_policy_snapshots_on_extracted_at"
     t.index ["store_id", "checksum"], name: "index_policy_snapshots_on_store_id_and_checksum", unique: true

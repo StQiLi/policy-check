@@ -1,37 +1,38 @@
 import type { ExtensionMessage, TabState, DetectionResult, PolicySummary } from '../shared/types';
 
-// ── DOM references ──────────────────────────────────────────────
+type UIState = 'scanning' | 'not-shopify' | 'policy-not-found' | 'results';
+type Sentiment = 'positive' | 'warning' | 'neutral';
 
-const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+const $ = <T extends HTMLElement>(id: string): T => {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`Missing element: ${id}`);
+  return el as T;
+};
 
-const statusIndicator       = $<HTMLDivElement>('status-indicator');
-const detectionText         = $<HTMLDivElement>('detection-text');
-const confidenceValueEl     = $<HTMLSpanElement>('confidence-value');
-const cacheBadgeEl          = $<HTMLSpanElement>('cache-badge');
+const popupRoot = $<HTMLElement>('popup-root');
+const statusBar = $<HTMLElement>('detection-status-section');
+const detectionText = $<HTMLElement>('detection-text');
+const detectionDomain = $<HTMLElement>('detection-domain');
+const confidenceValueEl = $<HTMLSpanElement>('confidence-value');
+const cacheBadgeEl = $<HTMLSpanElement>('cache-badge');
 
-const popupRoot             = $<HTMLElement>('popup-root');
-const notFoundDomainEl      = $<HTMLElement>('not-found-domain');
-const detectionDebugEl      = $<HTMLElement>('detection-debug');
-const noDetectionActionsEl = $<HTMLElement>('no-detection-actions');
-const runDetectionBtn      = $<HTMLButtonElement>('run-detection-btn');
-
-const returnWindowEl   = $<HTMLElement>('return-window');
-const conditionEl      = $<HTMLElement>('condition');
-const feesEl           = $<HTMLElement>('fees');
-const shippingEl       = $<HTMLElement>('shipping');
-const exclusionsEl     = $<HTMLElement>('exclusions');
-
-const returnWindowConfidenceEl  = $<HTMLElement>('return-window-confidence');
-const conditionConfidenceEl     = $<HTMLElement>('condition-confidence');
-const feesConfidenceEl          = $<HTMLElement>('fees-confidence');
-const shippingConfidenceEl      = $<HTMLElement>('shipping-confidence');
-const exclusionsConfidenceEl    = $<HTMLElement>('exclusions-confidence');
-
-const policyLinkEl     = $<HTMLAnchorElement>('policy-link');
-const saveSnapshotBtn  = $<HTMLButtonElement>('save-snapshot');
-const viewHistoryBtn   = $<HTMLButtonElement>('view-history');
-const errorMessageEl   = $<HTMLDivElement>('error-message');
 const scanningMessageEl = $<HTMLParagraphElement>('scanning-message');
+const notFoundDomainEl = $<HTMLElement>('not-found-domain');
+const detectionDebugEl = $<HTMLElement>('detection-debug');
+const noDetectionActionsEl = $<HTMLElement>('no-detection-actions');
+
+const returnWindowEl = $<HTMLSpanElement>('return-window');
+const conditionEl = $<HTMLSpanElement>('condition');
+const feesEl = $<HTMLSpanElement>('fees');
+const shippingEl = $<HTMLSpanElement>('shipping');
+const exclusionsEl = $<HTMLSpanElement>('exclusions');
+
+const policyLinkEl = $<HTMLAnchorElement>('policy-link');
+const saveSnapshotBtn = $<HTMLButtonElement>('save-snapshot');
+const viewHistoryBtn = $<HTMLButtonElement>('view-history');
+const openOptionsEl = $<HTMLAnchorElement>('open-options');
+const runDetectionBtn = $<HTMLButtonElement>('run-detection-btn');
+const errorMessageEl = $<HTMLDivElement>('error-message');
 
 let currentState: TabState | null = null;
 let pollIntervalId: ReturnType<typeof setInterval> | null = null;
@@ -39,122 +40,127 @@ let pollIntervalId: ReturnType<typeof setInterval> | null = null;
 const POLL_MS = 400;
 const POLL_TIMEOUT_MS = 15000;
 
+function runWithViewTransition(update: () => void): void {
+  const transitionApi = (document as Document & { startViewTransition?: (cb: () => void) => void }).startViewTransition;
+  if (typeof transitionApi === 'function') {
+    transitionApi.call(document, update);
+    return;
+  }
+  update();
+}
+
 function isPendingStatus(status: TabState['status']): boolean {
   return status === 'detecting' || status === 'fetching' || status === 'extracting';
 }
 
-/** Poll tab state until we have a final status (done/error) or timeout. */
-function pollForTabState(tabId: number): void {
-  if (pollIntervalId) clearInterval(pollIntervalId);
-  const deadline = Date.now() + POLL_TIMEOUT_MS;
-
-  pollIntervalId = setInterval(() => {
-    if (Date.now() > deadline) {
-      if (pollIntervalId) clearInterval(pollIntervalId);
-      pollIntervalId = null;
-      return;
-    }
-    chrome.runtime.sendMessage(
-      { type: 'GET_TAB_STATE', tabId } as ExtensionMessage,
-      (response: { state?: TabState }) => {
-        if (chrome.runtime.lastError) return;
-        const state = response?.state ?? null;
-        const status = (state as TabState | null)?.status ?? 'done';
-        if (isPendingStatus(status)) {
-          setScanningMessage(status as 'detecting' | 'fetching' | 'extracting');
-        } else {
-          if (pollIntervalId) clearInterval(pollIntervalId);
-          pollIntervalId = null;
-          currentState = state;
-          renderState(currentState);
-        }
-      },
-    );
-  }, POLL_MS);
-}
-
-/** Run detection on the active tab and render the result. Used on popup open and by "Run detection" button. */
-function runDetection(callback?: () => void): void {
-  chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-    if (!tab?.id) {
-      showError('No active tab found');
-      showState('not-shopify');
-      renderDetectionDebug(null);
-      callback?.();
-      return;
-    }
-    setScanningMessage('detecting');
-    showState('scanning');
-    chrome.runtime.sendMessage(
-      { type: 'RUN_DETECTION', tabId: tab.id } as ExtensionMessage,
-      (response: { state?: TabState; injectError?: string }) => {
-        if (chrome.runtime.lastError) {
-          showError('Detection failed. Reload the store page and try again.');
-          showState('not-shopify');
-          renderDetectionDebug(null);
-          callback?.();
-          return;
-        }
-        currentState = response?.state ?? null;
-        if (response?.injectError) showError(response.injectError);
-        renderState(currentState);
-        if (tab.id && currentState && isPendingStatus((currentState as TabState).status)) {
-          pollForTabState(tab.id);
-        }
-        callback?.();
-      },
-    );
+function showState(state: UIState): void {
+  runWithViewTransition(() => {
+    popupRoot.setAttribute('data-state', state);
   });
 }
 
-// ── UI state ────────────────────────────────────────────────────
-
-type UIState = 'scanning' | 'not-shopify' | 'policy-not-found' | 'results';
-
-function showState(state: UIState): void {
-  popupRoot?.setAttribute('data-state', state);
-}
-
 function setScanningMessage(status: 'detecting' | 'fetching' | 'extracting'): void {
-  if (!scanningMessageEl) return;
-  scanningMessageEl.textContent =
-    status === 'detecting' ? 'Detecting store...' : 'Analyzing policy...';
+  scanningMessageEl.textContent = status === 'detecting' ? 'Detecting store...' : 'Analyzing policy...';
 }
 
 function renderDetectionDebug(detection: DetectionResult | null): void {
-  if (!detectionDebugEl) return;
-  if (noDetectionActionsEl) noDetectionActionsEl.classList.add('hidden');
+  noDetectionActionsEl.classList.add('hidden');
+
   if (!detection) {
-    detectionDebugEl.textContent = 'Reload the store page or use Run detection now.';
+    detectionDebugEl.textContent = 'Reload the store page or run detection manually.';
     detectionDebugEl.classList.remove('hidden');
-    noDetectionActionsEl?.classList.remove('hidden');
+    noDetectionActionsEl.classList.remove('hidden');
     return;
   }
+
   detectionDebugEl.textContent = '';
   detectionDebugEl.classList.add('hidden');
 }
 
-// ── Renderers ───────────────────────────────────────────────────
+function classifyReturnWindow(value: string): Sentiment {
+  const normalized = value.toLowerCase();
+  if (normalized.includes('final sale') || normalized.includes('no returns')) return 'warning';
+
+  const dayMatch = normalized.match(/(\d{1,3})\s*(business\s*)?days?/);
+  const days = dayMatch ? Number(dayMatch[1]) : null;
+  if (days !== null && Number.isFinite(days)) {
+    if (days <= 14) return 'warning';
+    if (days >= 30) return 'positive';
+  }
+
+  return 'neutral';
+}
+
+function classifyGeneric(value: string): Sentiment {
+  const normalized = value.toLowerCase();
+  if (normalized.includes('not specified') || normalized.includes('not found')) return 'neutral';
+  if (/(free|none specified|no restocking fee|no fee|seller pays)/.test(normalized)) return 'positive';
+  if (/(customer pays|buyer pays|restocking fee|final sale|non-returnable|fee)/.test(normalized)) return 'warning';
+  return 'neutral';
+}
+
+function applyPillSentiment(el: HTMLElement, sentiment: Sentiment): void {
+  el.classList.remove('pill--positive', 'pill--warning', 'pill--neutral');
+  el.classList.add(
+    sentiment === 'positive'
+      ? 'pill--positive'
+      : sentiment === 'warning'
+        ? 'pill--warning'
+        : 'pill--neutral',
+  );
+  el.setAttribute('data-sentiment', sentiment);
+}
+
+function setPillValue(el: HTMLSpanElement, text: string, sentiment: Sentiment): void {
+  el.textContent = text;
+  el.title = text;
+  applyPillSentiment(el, sentiment);
+}
+
+function renderDetection(detection: DetectionResult): void {
+  statusBar.setAttribute('data-detected', detection.isShopify ? 'true' : 'false');
+  detectionText.textContent = detection.isShopify ? 'Shopify Store Detected' : 'Store Detection Failed';
+  detectionDomain.textContent = detection.domain;
+  confidenceValueEl.textContent = `${detection.confidence}%`;
+}
+
+function renderSummary(summary: PolicySummary): void {
+  const fields = summary.fields;
+  const returnWindow = fields.returnWindow ?? 'Not found';
+  const condition = fields.conditionRequirements ?? 'Not specified';
+  const fees = fields.fees ?? 'Not specified';
+  const shipping = fields.returnShipping ?? 'Not specified';
+  const exclusions = fields.exclusions ?? 'None specified';
+
+  setPillValue(returnWindowEl, returnWindow, classifyReturnWindow(returnWindow));
+  setPillValue(conditionEl, condition, classifyGeneric(condition));
+  setPillValue(feesEl, fees, classifyGeneric(fees));
+  setPillValue(shippingEl, shipping, classifyGeneric(shipping));
+  setPillValue(exclusionsEl, exclusions, classifyGeneric(exclusions));
+
+  policyLinkEl.href = summary.policyUrl;
+  policyLinkEl.classList.remove('hidden');
+}
 
 function renderState(state: TabState | null): void {
-  const status = (state as any)?.status ?? 'done';
-  const fromCache = (state as any)?.fromCache ?? false;
+  const status = state?.status ?? 'done';
+  const fromCache = state?.fromCache ?? false;
 
-  if (status === 'detecting' || status === 'fetching' || status === 'extracting') {
-    setScanningMessage(status);
+  if (isPendingStatus(status)) {
+    setScanningMessage(status as 'detecting' | 'fetching' | 'extracting');
     showState('scanning');
     saveSnapshotBtn.disabled = true;
     return;
   }
 
   if (status === 'error') {
-    showError(state?.errorMessage ?? 'An error occurred');
+    showError(state?.errorMessage ?? 'An error occurred.');
     showState('not-shopify');
     saveSnapshotBtn.disabled = true;
     return;
   }
 
-  if (!state || !state.detection || !state.detection.isShopify) {
+  if (!state?.detection?.isShopify) {
     showState('not-shopify');
     renderDetectionDebug(state?.detection ?? null);
     saveSnapshotBtn.disabled = true;
@@ -172,93 +178,158 @@ function renderState(state: TabState | null): void {
   renderDetection(state.detection);
   renderSummary(state.summary);
   saveSnapshotBtn.disabled = false;
-
-  if (fromCache) {
-    cacheBadgeEl.classList.remove('hidden');
-  } else {
-    cacheBadgeEl.classList.add('hidden');
-  }
+  cacheBadgeEl.classList.toggle('hidden', !fromCache);
 }
 
-function renderDetection(detection: DetectionResult): void {
-  statusIndicator.classList.remove('detected', 'not-detected');
-  statusIndicator.classList.add('detected');
-  detectionText.textContent = 'Shopify Store Detected';
-  confidenceValueEl.textContent = `Confidence: ${detection.confidence}%`;
+function pollForTabState(tabId: number): void {
+  if (pollIntervalId) clearInterval(pollIntervalId);
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+
+  pollIntervalId = setInterval(() => {
+    if (Date.now() > deadline) {
+      if (pollIntervalId) clearInterval(pollIntervalId);
+      pollIntervalId = null;
+      return;
+    }
+
+    chrome.runtime.sendMessage(
+      { type: 'GET_TAB_STATE', tabId } as ExtensionMessage,
+      (response: { state?: TabState }) => {
+        if (chrome.runtime.lastError) return;
+        const state = response?.state ?? null;
+        if (state && isPendingStatus(state.status)) {
+          setScanningMessage(state.status as 'detecting' | 'fetching' | 'extracting');
+          return;
+        }
+
+        if (pollIntervalId) clearInterval(pollIntervalId);
+        pollIntervalId = null;
+        currentState = state;
+        renderState(currentState);
+      },
+    );
+  }, POLL_MS);
 }
 
-function setConfidenceDot(el: HTMLElement, level: 'low' | 'medium' | 'high'): void {
-  el.setAttribute('data-level', level);
+function runDetection(callback?: () => void): void {
+  chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+    if (!tab?.id) {
+      showError('No active tab found.');
+      showState('not-shopify');
+      renderDetectionDebug(null);
+      callback?.();
+      return;
+    }
+
+    setScanningMessage('detecting');
+    showState('scanning');
+
+    chrome.runtime.sendMessage(
+      { type: 'RUN_DETECTION', tabId: tab.id } as ExtensionMessage,
+      (response: { state?: TabState; injectError?: string }) => {
+        if (chrome.runtime.lastError) {
+          showError('Detection failed. Reload the store page and try again.');
+          showState('not-shopify');
+          renderDetectionDebug(null);
+          callback?.();
+          return;
+        }
+
+        currentState = response?.state ?? null;
+        if (response?.injectError) showError(response.injectError);
+        renderState(currentState);
+
+        if (tab.id && currentState && isPendingStatus(currentState.status)) {
+          pollForTabState(tab.id);
+        }
+
+        callback?.();
+      },
+    );
+  });
 }
 
-function renderSummary(summary: PolicySummary): void {
-  const f = summary.fields;
-  const c = summary.confidence;
-
-  returnWindowEl.textContent = f.returnWindow ?? 'Not found';
-  conditionEl.textContent    = f.conditionRequirements ?? 'Not specified';
-  feesEl.textContent         = f.fees ?? 'Not specified';
-  shippingEl.textContent     = f.returnShipping ?? 'Not specified';
-  exclusionsEl.textContent   = f.exclusions ?? 'None specified';
-
-  setConfidenceDot(returnWindowConfidenceEl,  c.returnWindow);
-  setConfidenceDot(conditionConfidenceEl,     c.conditionRequirements);
-  setConfidenceDot(feesConfidenceEl,          c.fees);
-  setConfidenceDot(shippingConfidenceEl,      c.returnShipping);
-  setConfidenceDot(exclusionsConfidenceEl,    c.exclusions);
-
-  policyLinkEl.href = summary.policyUrl;
-  policyLinkEl.classList.remove('hidden');
+function isHttpUrl(url: string | undefined): boolean {
+  return typeof url === 'string' && /^https?:\/\//i.test(url);
 }
 
-// ── Actions ─────────────────────────────────────────────────────
-
-function handleSaveSnapshot(): void {
-  if (!currentState?.summary) return;
-
-  saveSnapshotBtn.disabled = true;
-  saveSnapshotBtn.textContent = 'Saving\u2026';
-
-  const message: ExtensionMessage = { type: 'SAVE_SNAPSHOT', data: currentState.summary };
+function sendSaveSnapshot(summary: PolicySummary): void {
+  const message: ExtensionMessage = { type: 'SAVE_SNAPSHOT', data: summary };
 
   chrome.runtime.sendMessage(message, (response) => {
     if (chrome.runtime.lastError || !response?.success) {
-      showError(response?.error ?? 'Failed to save snapshot');
+      const raw = response?.error ?? 'Failed to save snapshot';
+      const isAuth = /auth|token|401|unauthorized/i.test(raw);
+      showError(
+        isAuth ? `${raw} Open extension Options (right-click icon) to set your token.` : raw,
+      );
       saveSnapshotBtn.disabled = false;
+      saveSnapshotBtn.classList.remove('btn--saving', 'btn--saved');
       saveSnapshotBtn.textContent = 'Save Snapshot';
       return;
     }
 
+    saveSnapshotBtn.classList.remove('btn--saving');
+    saveSnapshotBtn.classList.add('btn--saved');
     saveSnapshotBtn.textContent = 'Saved!';
-    setTimeout(() => {
+
+    window.setTimeout(() => {
+      saveSnapshotBtn.classList.remove('btn--saved');
       saveSnapshotBtn.textContent = 'Save Snapshot';
       saveSnapshotBtn.disabled = false;
     }, 2000);
   });
 }
 
-function handleViewHistory(): void {
-  // TODO: Open history page in a new tab or implement inline history view
-  showError('History view coming in a future release');
+function handleSaveSnapshot(): void {
+  if (!currentState?.summary) return;
+
+  saveSnapshotBtn.disabled = true;
+  saveSnapshotBtn.textContent = 'Saving...';
+  saveSnapshotBtn.classList.add('btn--saving');
+
+  const baseSummary = currentState.summary;
+
+  chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+    if (chrome.runtime.lastError) {
+      sendSaveSnapshot(baseSummary);
+      return;
+    }
+
+    const summary = isHttpUrl(tab?.url) ? { ...baseSummary, pageUrl: tab.url } : baseSummary;
+    sendSaveSnapshot(summary);
+  });
 }
 
-// ── Utilities ───────────────────────────────────────────────────
+function handleViewHistory(): void {
+  chrome.tabs.create({ url: chrome.runtime.getURL('src/hub/index.html') }, () => {
+    if (chrome.runtime.lastError) {
+      showError('Failed to open history page.');
+    }
+  });
+}
+
+function handleOpenOptions(): void {
+  if (chrome.runtime.openOptionsPage) {
+    chrome.runtime.openOptionsPage();
+    return;
+  }
+  chrome.tabs.create({ url: chrome.runtime.getURL('src/options/index.html') });
+}
 
 function showError(message: string): void {
   errorMessageEl.textContent = message;
   errorMessageEl.classList.remove('hidden');
-  setTimeout(() => errorMessageEl.classList.add('hidden'), 3000);
+  window.setTimeout(() => errorMessageEl.classList.add('hidden'), 3200);
 }
-
-// ── Wire up ─────────────────────────────────────────────────────
 
 saveSnapshotBtn.addEventListener('click', handleSaveSnapshot);
 viewHistoryBtn.addEventListener('click', handleViewHistory);
-runDetectionBtn?.addEventListener('click', handleRunDetection);
+openOptionsEl.addEventListener('click', (event) => {
+  event.preventDefault();
+  handleOpenOptions();
+});
+runDetectionBtn.addEventListener('click', () => runDetection());
 
 showState('scanning');
 runDetection();
-
-function handleRunDetection(): void {
-  runDetection();
-}

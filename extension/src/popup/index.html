@@ -4,30 +4,23 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Return Clarity</title>
+  <link rel="stylesheet" href="../shared/tokens.css">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <div class="popup-container" id="popup-root" data-state="scanning">
-    <header class="header">
-      <h1 class="title">Return Clarity</h1>
-      <span class="version">v1.0.0</span>
-    </header>
-
     <section id="scanning-state" class="state-section">
-      <div class="spinner"></div>
+      <div class="spinner" aria-hidden="true"></div>
+      <p class="state-heading">Scanning Store</p>
       <p class="state-subtext" id="scanning-message">Detecting store...</p>
     </section>
 
     <section id="not-shopify-state" class="state-section">
-      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-        <polyline points="9 22 9 12 15 12 15 22"/>
-      </svg>
       <p class="state-heading">Not a Shopify Store</p>
-      <p class="state-subtext">Visit a Shopify store to see return policy information.</p>
+      <p class="state-subtext">Visit a Shopify store to analyze return policy information.</p>
       <p id="detection-debug" class="debug-line" aria-live="polite"></p>
       <div id="no-detection-actions" class="debug-actions hidden">
-        <button type="button" id="run-detection-btn" class="btn btn-secondary btn-small">Run detection now</button>
+        <button type="button" id="run-detection-btn" class="btn btn-secondary btn-small">Run Detection</button>
         <span class="debug-actions-hint">or reload the store page and open the popup again</span>
       </div>
     </section>
@@ -35,77 +28,66 @@
     <section id="policy-not-found-state" class="state-section">
       <p class="state-heading">Policy Not Found</p>
       <p class="state-subtext">Shopify store detected, but no return policy page was found.</p>
-      <p id="not-found-domain" class="state-subtext"></p>
+      <p id="not-found-domain" class="state-subtext muted"></p>
     </section>
 
-    <section id="detection-status-section" class="detection-status">
-      <div class="status-row">
-        <div class="status-indicator" id="status-indicator"></div>
-        <div class="status-text">
-          <div id="detection-text">Checking...</div>
-          <div class="confidence">
-            <span id="confidence-value"></span>
-            <span id="cache-badge" class="cache-badge hidden">Cached</span>
+    <section id="results-shell" class="results-shell">
+      <header id="detection-status-section" class="status-bar" data-detected="true">
+        <div>
+          <p class="status-label" id="detection-text">Shopify Store Detected</p>
+          <p class="status-domain" id="detection-domain">—</p>
+        </div>
+        <div class="status-right">
+          <span class="confidence-score" id="confidence-value">0%</span>
+          <span id="cache-badge" class="cache-badge hidden">Cached</span>
+        </div>
+      </header>
+
+      <section class="policy-summary" id="policy-summary">
+        <div class="summary-row">
+          <div class="row-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v4m0 0a7 7 0 1 1-7 7"/></svg>
+            <span>Return Window</span>
           </div>
+          <span id="return-window" class="pill pill--neutral">—</span>
         </div>
-      </div>
+        <div class="summary-row">
+          <div class="row-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5 12 4l8 5.5v7L12 22l-8-5.5v-7Z"/></svg>
+            <span>Condition</span>
+          </div>
+          <span id="condition" class="pill pill--neutral">—</span>
+        </div>
+        <div class="summary-row">
+          <div class="row-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 7v5c0 5 3.4 8.5 8 9 4.6-.5 8-4 8-9V7l-8-4Zm0 5v8"/></svg>
+            <span>Fees</span>
+          </div>
+          <span id="fees" class="pill pill--neutral">—</span>
+        </div>
+        <div class="summary-row">
+          <div class="row-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h11v7H3V7Zm11 2h4l3 3v2h-7V9Zm2 8a2 2 0 1 1 0 4 2 2 0 0 1 0-4ZM7 17a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"/></svg>
+            <span>Shipping</span>
+          </div>
+          <span id="shipping" class="pill pill--neutral">—</span>
+        </div>
+        <div class="summary-row">
+          <div class="row-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 16 16M6 6a8 8 0 0 1 11 11"/></svg>
+            <span>Exclusions</span>
+          </div>
+          <span id="exclusions" class="pill pill--neutral">—</span>
+        </div>
+      </section>
+
+      <a id="policy-link" href="#" target="_blank" rel="noopener noreferrer" class="policy-link hidden">View full policy</a>
     </section>
-
-    <section class="policy-summary" id="policy-summary">
-      <h2 class="section-title">Return Summary</h2>
-
-      <dl class="summary-list">
-        <div class="summary-item">
-          <dt>Window:</dt>
-          <dd>
-            <span id="return-window">—</span>
-            <span class="confidence-dot" id="return-window-confidence" data-level="low"></span>
-          </dd>
-        </div>
-
-        <div class="summary-item">
-          <dt>Condition:</dt>
-          <dd>
-            <span id="condition">—</span>
-            <span class="confidence-dot" id="condition-confidence" data-level="low"></span>
-          </dd>
-        </div>
-
-        <div class="summary-item">
-          <dt>Fees:</dt>
-          <dd>
-            <span id="fees">—</span>
-            <span class="confidence-dot" id="fees-confidence" data-level="low"></span>
-          </dd>
-        </div>
-
-        <div class="summary-item">
-          <dt>Shipping:</dt>
-          <dd>
-            <span id="shipping">—</span>
-            <span class="confidence-dot" id="shipping-confidence" data-level="low"></span>
-          </dd>
-        </div>
-
-        <div class="summary-item">
-          <dt>Exclusions:</dt>
-          <dd>
-            <span id="exclusions">—</span>
-            <span class="confidence-dot" id="exclusions-confidence" data-level="low"></span>
-          </dd>
-        </div>
-      </dl>
-    </section>
-
-    <a id="policy-link" href="#" target="_blank" class="policy-link hidden">View full policy</a>
 
     <footer class="footer">
-      <button id="save-snapshot" class="btn btn-primary" disabled>
-        Save Snapshot
-      </button>
-      <button id="view-history" class="btn btn-secondary" disabled>
-        View History
-      </button>
+      <button id="save-snapshot" class="btn btn-primary" disabled>Save Snapshot</button>
+      <button id="view-history" class="btn btn-secondary">View History</button>
+      <a id="open-options" href="#" class="footer-link">Options (set auth token)</a>
     </footer>
 
     <div id="error-message" class="error hidden"></div>

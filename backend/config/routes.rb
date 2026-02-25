@@ -9,11 +9,11 @@ Rails.application.routes.draw do
       post 'extract', to: 'extract#create'
 
       # Snapshots
-      resources :snapshots, only: [:create]
+      resources :snapshots, only: [:create, :index]
       
       # Stores
-      get 'stores/:domain/latest', to: 'stores#latest'
-      get 'stores/:domain/history', to: 'stores#history'
+      get 'stores/:domain/latest', to: 'stores#latest', constraints: { domain: /[^\/]+/ }
+      get 'stores/:domain/history', to: 'stores#history', constraints: { domain: /[^\/]+/ }
       
       # Feedback
       resources :feedback, only: [:create]

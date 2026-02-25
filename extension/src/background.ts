@@ -518,12 +518,15 @@ async function saveSnapshot(summary: PolicySummary): Promise<unknown> {
   const authToken = typeof rawToken === 'string' ? rawToken.trim() : '';
 
   if (!authToken) {
-    throw new Error('No auth token configured. Set one in extension options.');
+    throw new Error(
+      'No auth token. Right‑click the extension icon → Options, and paste your API token.'
+    );
   }
 
   const payload = {
     store_domain: summary.storeDomain,
     policy_url: summary.policyUrl,
+    page_url: summary.pageUrl,
     policy_type: getPolicyType(summary.policyUrl),
     summary: { fields: summary.fields, confidence: summary.confidence },
     raw_text_snippet: summary.rawTextSnippet,

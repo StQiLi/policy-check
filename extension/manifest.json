@@ -3,16 +3,30 @@
   "name": "Return Clarity for Shopify",
   "version": "1.0.0",
   "description": "Automatically extract and display return policy summaries for Shopify stores",
-  "permissions": ["activeTab", "storage", "scripting", "tabs"],
-  "host_permissions": ["*://*.myshopify.com/*", "*://*/*"],
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "*://*.myshopify.com/*",
+    "*://*/*"
+  ],
   "background": {
     "service_worker": "src/background.ts",
     "type": "module"
   },
   "content_scripts": [
     {
-      "matches": ["*://*.myshopify.com/*", "*://*/*/policies/*", "*://*/*"],
-      "js": ["src/content.ts"],
+      "matches": [
+        "*://*.myshopify.com/*",
+        "*://*/*/policies/*",
+        "*://*/*"
+      ],
+      "js": [
+        "src/content.ts"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -33,5 +47,8 @@
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'"
+  },
+  "options_ui": {
+    "page": "src/options/index.html"
   }
 }
