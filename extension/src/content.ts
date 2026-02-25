@@ -6,6 +6,7 @@
 import { detectShopify } from './shared/shopifyDetect';
 import { resolvePolicyUrls, isPolicyPage } from './shared/policyResolver';
 import { logger } from './shared/logger';
+import { compactPolicyTextForApi, scorePolicyTextQuality, stripHtmlToText } from './shared/extract';
 import type { ExtensionMessage, PolicyUrls } from './shared/types';
 
 /**
@@ -30,13 +31,25 @@ async function run(): Promise<void> {
     if (!detection.isShopify) return;
 
     if (isPolicyPage()) {
-      sendMessage({
-        type: 'POLICY_PAGE_FOUND',
-        policyUrl: window.location.href,
-        rawHtml: document.body.innerHTML,
-        domain: detection.domain,
+      const rawHtml = document.body.innerHTML;
+      const text = stripHtmlToText(rawHtml);
+      const quality = scorePolicyTextQuality(compactPolicyTextForApi(text));
+
+      // Guard against false positives (e.g. generic help-center shell pages).
+      if (quality >= 6) {
+        sendMessage({
+          type: 'POLICY_PAGE_FOUND',
+          policyUrl: window.location.href,
+          rawHtml,
+          domain: detection.domain,
+        });
+        return;
+      }
+
+      logger.debug('Current page looked like policy URL but had low text quality; resolving candidates instead', {
+        href: window.location.href,
+        quality,
       });
-      return;
     }
 
     const urls: PolicyUrls = await resolvePolicyUrls();

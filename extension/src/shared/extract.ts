@@ -5,9 +5,11 @@
 
 import type { PolicySummary, PolicyFields, PolicyConfidence } from './types';
 
+type ConfidenceLevel = 'low' | 'medium' | 'high';
+
 type ExtractResult = {
   value: string | null;
-  confidence: 'low' | 'medium' | 'high';
+  confidence: ConfidenceLevel;
 };
 
 // ── HTML stripping ───────────────────────────────────────────────
@@ -47,37 +49,8 @@ function extractContentFromContainer(html: string): string | null {
 
 export function stripHtmlToText(html: string): string {
   const contentHtml = extractContentFromContainer(html) ?? html;
-
-  let text = contentHtml
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, '')
-    .replace(/<nav[\s\S]*?<\/nav>/gi, '')
-    .replace(/<header[\s\S]*?<\/header>/gi, '')
-    .replace(/<footer[\s\S]*?<\/footer>/gi, '')
-    .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
-    .replace(/<svg[\s\S]*?<\/svg>/gi, '')
-    // Chat widgets, cookie banners, and other overlays
-    .replace(/<div[^>]*(?:chat|livechat|intercom|drift|zendesk|tawk|crisp|cookie|consent|banner|popup|modal|overlay)[^>]*>[\s\S]*?<\/div>/gi, '');
-
-  text = text
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/?(p|li|h[1-6]|div)[^>]*>/gi, '\n');
-
-  text = text.replace(/<[^>]+>/g, '');
-
-  text = text
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, ' ');
-
-  return text
-    .replace(/[^\S\n]+/g, ' ')
-    .replace(/\n{2,}/g, '\n')
-    .trim();
+  const stripped = stripTagsToText(contentHtml);
+  return normalizeText(stripped).slice(0, MAX_TEXT_LENGTH);
 }
 
 // ── Core extraction ──────────────────────────────────────────────
@@ -87,7 +60,8 @@ export function extractPolicyFromText(
   policyUrl: string,
   storeDomain: string,
 ): PolicySummary {
-  const lower = text.toLowerCase();
+  const normalized = normalizeText(text);
+  const lower = normalized.toLowerCase();
 
   const returnWindowResult = extractReturnWindow(lower);
   const conditionResult = extractConditionRequirements(lower);
@@ -115,7 +89,7 @@ export function extractPolicyFromText(
       shippingResult,
       exclusionsResult,
     ),
-    rawTextSnippet: text.slice(0, 500),
+    rawTextSnippet: normalized.slice(0, 500),
   };
 }
 
@@ -133,55 +107,157 @@ export function extractPolicy(policyUrl: string): PolicySummary {
 // ── Sentence utilities ───────────────────────────────────────────
 
 function getSentences(text: string): string[] {
-  return text.split(/[.\n]+/).filter((s) => s.trim().length > 5);
+  return text
+    .split(SENTENCE_SPLIT_REGEX)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 8);
 }
 
 function extractClause(text: string, matchIndex: number, radius: number): string {
   const start = Math.max(0, matchIndex - radius);
   const end = Math.min(text.length, matchIndex + radius);
-  return text.slice(start, end).trim();
+  return text.slice(start, end).replace(/\s+/g, ' ').trim();
 }
 
 // ── Field extractors ────────────────────────────────────────────
 
 const WORD_NUMBERS: Record<string, string> = {
+  one: '1',
+  two: '2',
+  three: '3',
+  four: '4',
+  five: '5',
+  six: '6',
   seven: '7',
+  eight: '8',
+  nine: '9',
+  ten: '10',
+  eleven: '11',
+  twelve: '12',
+  thirteen: '13',
   fourteen: '14',
   fifteen: '15',
+  sixteen: '16',
+  seventeen: '17',
+  eighteen: '18',
+  nineteen: '19',
+  twenty: '20',
+  twentyone: '21',
+  twentyeight: '28',
   thirty: '30',
+  forty: '40',
+  fortyfive: '45',
+  fifty: '50',
   sixty: '60',
+  seventy: '70',
+  eighty: '80',
   ninety: '90',
 };
 
-function extractReturnWindow(lower: string): ExtractResult {
-  const negativePattern = /no\s+returns?|all\s+sales?\s+(?:are\s+)?final|non[- ]?refundable/;
-  const negativeMatch = lower.match(negativePattern);
-  if (negativeMatch) {
-    return { value: negativeMatch[0], confidence: 'high' };
-  }
-
-  let normalized = lower;
+function normalizeNumberWords(lower: string): string {
+  let normalized = lower.replace(/-/g, ' ');
   for (const [word, num] of Object.entries(WORD_NUMBERS)) {
     normalized = normalized.replace(new RegExp(`\\b${word}\\b`, 'g'), num);
   }
+  // Normalize "twenty one" style leftovers.
+  normalized = normalized
+    .replace(/\btwenty\s+one\b/g, '21')
+    .replace(/\btwenty\s+eight\b/g, '28')
+    .replace(/\bforty\s+five\b/g, '45');
+  return normalized;
+}
 
-  const anchorPattern = /returns?|refunds?|exchanges?|replacement/;
-  const durationPatterns = [
-    /\d+[- ]?(?:calendar\s+)?days?/,
-    /\d+[- ]?weeks?/,
-    /\d+[- ]?months?/,
-  ];
+function estimateConfidence(score: number): ConfidenceLevel {
+  if (score >= 5) return 'high';
+  if (score >= 3) return 'medium';
+  return 'low';
+}
 
-  for (const pattern of durationPatterns) {
-    const re = new RegExp(pattern.source, 'g');
+function summarizeSentences(sentences: string[], maxCount: number): string | null {
+  if (sentences.length === 0) return null;
+  const unique = Array.from(new Set(sentences.map((s) => s.trim()).filter(Boolean)));
+  return unique
+    .slice(0, maxCount)
+    .map((s) => s.replace(/\s+/g, ' '))
+    .join('; ')
+    .slice(0, 260);
+}
+
+function sentenceHasAnchor(sentence: string): boolean {
+  return FIELD_ANCHORS.test(sentence);
+}
+
+function strongestMatch(
+  lower: string,
+  patterns: RegExp[],
+): { text: string; index: number; score: number } | null {
+  let best: { text: string; index: number; score: number } | null = null;
+
+  for (const pattern of patterns) {
+    const re = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`);
     let match: RegExpExecArray | null;
-    while ((match = re.exec(normalized)) !== null) {
-      const windowStart = Math.max(0, match.index - 300);
-      const windowEnd = Math.min(normalized.length, match.index + match[0].length + 300);
-      if (anchorPattern.test(normalized.slice(windowStart, windowEnd))) {
-        return { value: match[0], confidence: 'high' };
+    while ((match = re.exec(lower)) !== null) {
+      const index = match.index;
+      const clause = extractClause(lower, index, 120);
+      const score =
+        (sentenceHasAnchor(clause) ? 2 : 0) +
+        (/\bif\b|\bunless\b|\bexcept\b/.test(clause) ? 1 : 0) +
+        (/\breturn|refund|exchange\b/.test(clause) ? 2 : 0);
+      if (!best || score > best.score) {
+        best = { text: match[0], index, score };
       }
     }
+  }
+
+  return best;
+}
+
+function extractReturnWindow(lower: string): ExtractResult {
+  const hardNegative = strongestMatch(lower, NEGATIVE_RETURN_PATTERNS);
+  const normalized = normalizeNumberWords(lower);
+  const durationPattern =
+    /\b(?:within|up to|for|from|after|accept(?:ed)?\s+for|eligible\s+for)?\s*(\d{1,3})(?:\s*(?:-|to)\s*(\d{1,3}))?\s*(calendar\s+)?(day|week|month|year)s?\b/g;
+
+  let best: { value: string; score: number } | null = null;
+  let match: RegExpExecArray | null;
+
+  while ((match = durationPattern.exec(normalized)) !== null) {
+    const start = match.index;
+    const clause = extractClause(normalized, start, 180);
+    if (!sentenceHasAnchor(clause)) continue;
+
+    const first = match[1];
+    const second = match[2];
+    const unit = match[4];
+    const value = second ? `${first}-${second} ${unit}s` : `${first} ${unit}${first === '1' ? '' : 's'}`;
+
+    let score = 3;
+    if (/\bwithin|from delivery|from purchase|of receipt\b/.test(clause)) score += 1;
+    if (/\bexchange|refund|return\b/.test(clause)) score += 1;
+    if (/\bif\b|\bunless\b/.test(clause)) score -= 1;
+
+    if (!best || score > best.score) best = { value, score };
+  }
+
+  if (hardNegative && !best) {
+    return { value: hardNegative.text, confidence: 'high' };
+  }
+
+  if (hardNegative && best) {
+    return { value: hardNegative.text, confidence: 'medium' };
+  }
+
+  if (best) {
+    return { value: best.value, confidence: estimateConfidence(best.score) };
+  }
+
+  const openEnded = strongestMatch(lower, [
+    /\breturns?\s+accepted\b/,
+    /\bcontact\s+us\s+for\s+returns?\b/,
+    /\bcase[- ]by[- ]case\b/,
+  ]);
+  if (openEnded) {
+    return { value: extractClause(lower, openEnded.index, 90), confidence: 'medium' };
   }
 
   return { value: null, confidence: 'low' };
@@ -193,127 +269,142 @@ function extractConditionRequirements(lower: string): ExtractResult {
     'unwashed',
     'tags attached',
     'tags still attached',
+    'with tags',
     'original packaging',
     'original condition',
     'unused',
     'unaltered',
+    'resalable condition',
+    'resellable condition',
     'like new',
     'new condition',
     'in its original',
+    'proof of purchase',
+    'receipt required',
   ];
 
   const sentences = getSentences(lower);
   const matched: string[] = [];
-  let hasMultipleInSentence = false;
+  let bestScore = 0;
 
   for (const sentence of sentences) {
     const hits = keywords.filter((kw) => sentence.includes(kw));
-    if (hits.length > 0) {
-      const trimmed = sentence.trim();
-      if (!matched.includes(trimmed)) matched.push(trimmed);
-      if (hits.length >= 2) hasMultipleInSentence = true;
-    }
+    if (hits.length === 0) continue;
+
+    const anchorBoost = sentenceHasAnchor(sentence) ? 1 : 0;
+    const negativePenalty = /\bnot\b|\bno\b/.test(sentence) ? 1 : 0;
+    const score = hits.length + anchorBoost - negativePenalty;
+    bestScore = Math.max(bestScore, score);
+
+    matched.push(sentence);
   }
 
   if (matched.length === 0) return { value: null, confidence: 'low' };
 
   return {
-    value: matched.slice(0, 2).join('; '),
-    confidence: hasMultipleInSentence ? 'high' : 'medium',
+    value: summarizeSentences(matched, 2),
+    confidence: estimateConfidence(bestScore),
   };
 }
 
 function extractFees(lower: string): ExtractResult {
-  const specificFeePatterns = [
-    /\d+%\s*restocking\s+fees?/,
-    /\d+\s*percent\s+restocking/,
-    /\$[\d.]+\s*restocking\s+fees?/,
-    /a\s+\$[\d.]+\s+fee\s+will\s+be\s+charged/,
-    /original\s+shipping\s+is\s+non[- ]?refundable/,
-    /shipping\s+fees?\s+are\s+not\s+refunded/,
+  const feePatterns = [
+    /\b\d{1,2}%\s*(?:restocking|processing)?\s*fee\b/,
+    /\b\d{1,2}\s*percent\s*(?:restocking|processing)?\s*fee\b/,
+    /\$\s?\d+(?:\.\d{1,2})?\s*(?:return|restocking|label|processing)?\s*fee\b/,
+    /\breturn\s+shipping\s+costs?\s+will\s+be\s+deducted\s+from\s+(?:your\s+)?refund\b/,
+    /\boriginal\s+shipping\s+(?:fees?\s+)?(?:is|are)\s+non[- ]?refundable\b/,
+    /\bshipping\s+fees?\s+are\s+not\s+refunded\b/,
   ];
-
-  for (const pattern of specificFeePatterns) {
-    const match = lower.match(pattern);
-    if (match && match.index !== undefined) {
-      return { value: extractClause(lower, match.index, 40), confidence: 'high' };
-    }
-  }
 
   const noFeePatterns = [
-    /no\s+restocking\s+fees?/,
-    /no\s+fees?/,
-    /free\s+returns?/,
-    /no\s+charge/,
+    /\bno\s+restocking\s+fees?\b/,
+    /\bno\s+return\s+fees?\b/,
+    /\bfree\s+returns?\b/,
+    /\bno\s+charge\b/,
+    /\bfull\s+refund\b/,
   ];
 
-  for (const pattern of noFeePatterns) {
-    const match = lower.match(pattern);
-    if (match && match.index !== undefined) {
-      return { value: extractClause(lower, match.index, 40), confidence: 'medium' };
-    }
+  const feeHit = strongestMatch(lower, feePatterns);
+  const noFeeHit = strongestMatch(lower, noFeePatterns);
+
+  if (feeHit && noFeeHit) {
+    const mixed = extractClause(lower, Math.min(feeHit.index, noFeeHit.index), 140);
+    return { value: mixed, confidence: 'medium' };
+  }
+
+  if (feeHit) {
+    return { value: extractClause(lower, feeHit.index, 90), confidence: estimateConfidence(feeHit.score + 2) };
+  }
+
+  if (noFeeHit) {
+    return { value: extractClause(lower, noFeeHit.index, 80), confidence: 'medium' };
   }
 
   return { value: null, confidence: 'low' };
 }
 
 function extractReturnShipping(lower: string): ExtractResult {
-  const freeExact = [
-    'free returns',
-    'free return shipping',
-    'prepaid return label',
-    "we'll provide a label",
-    'return label will be',
-    'free of charge',
-    'at no cost to you',
+  const freePatterns = [
+    /\bfree\s+returns?\b/,
+    /\bfree\s+return\s+shipping\b/,
+    /\bprepaid\s+return\s+label\b/,
+    /\bwe(?:\s+will|'ll)?\s+provide\s+(?:a\s+)?return\s+label\b/,
+    /\bat\s+no\s+cost\s+to\s+you\b/,
   ];
 
-  const sellerExact = [
-    'seller pays',
-    'we pay return shipping',
-    "we'll pay",
-    'at our expense',
+  const sellerPatterns = [
+    /\bwe\s+(?:pay|cover)\s+return\s+shipping\b/,
+    /\bseller\s+pays\b/,
+    /\bat\s+our\s+expense\b/,
   ];
 
-  const customerExact = [
-    'customer pays',
-    'buyer pays',
-    'at your expense',
-    "at the customer's expense",
-    'return shipping is your responsibility',
-    'shipping costs are non-refundable',
-    'you are responsible for',
+  const customerPatterns = [
+    /\bcustomer\s+pays\b/,
+    /\bbuyer\s+pays\b/,
+    /\byou\s+are\s+responsible\s+for\s+return\s+shipping\b/,
+    /\breturn\s+shipping\s+is\s+your\s+responsibility\b/,
+    /\bat\s+your\s+expense\b/,
   ];
 
-  const freePartial = ['we cover', 'we pay'];
+  const freeHit = strongestMatch(lower, freePatterns);
+  const sellerHit = strongestMatch(lower, sellerPatterns);
+  const customerHit = strongestMatch(lower, customerPatterns);
 
-  for (const phrase of freeExact) {
-    if (lower.includes(phrase)) return { value: 'Free returns', confidence: 'high' };
+  if ((freeHit || sellerHit) && customerHit) {
+    const defectiveClause = strongestMatch(lower, [
+      /\bif\s+(?:item|items)\s+(?:is|are)\s+(?:damaged|defective|incorrect)\b/,
+      /\bfor\s+defective\s+items?\b/,
+    ]);
+    if (defectiveClause) {
+      return {
+        value: 'Customer pays (seller pays for defective/incorrect items)',
+        confidence: 'high',
+      };
+    }
+    return { value: 'Varies by item/reason', confidence: 'medium' };
   }
-  for (const phrase of sellerExact) {
-    if (lower.includes(phrase)) return { value: 'Seller pays', confidence: 'high' };
-  }
-  for (const phrase of customerExact) {
-    if (lower.includes(phrase)) return { value: 'Customer pays', confidence: 'high' };
-  }
-  for (const phrase of freePartial) {
-    if (lower.includes(phrase)) return { value: 'Free returns', confidence: 'medium' };
-  }
+
+  if (freeHit) return { value: 'Free returns', confidence: estimateConfidence(freeHit.score + 2) };
+  if (sellerHit) return { value: 'Seller pays', confidence: estimateConfidence(sellerHit.score + 2) };
+  if (customerHit) return { value: 'Customer pays', confidence: estimateConfidence(customerHit.score + 2) };
 
   return { value: null, confidence: 'low' };
 }
 
 function extractExclusions(lower: string): ExtractResult {
-  const highConfidenceKeywords = ['final sale', 'cannot be returned'];
+  const strongExclusionPatterns = [
+    /\bfinal\s+sale\b/,
+    /\bcannot\s+be\s+returned\b/,
+    /\bnot\s+eligible\s+for\s+return\b/,
+    /\bnon[- ]?returnable\b/,
+  ];
+
   const keywords = [
     'final sale',
     'clearance',
     'custom',
     'personalized',
-    'non-returnable',
-    'cannot be returned',
-    'not eligible for return',
-    'excluded from',
     'sale items',
     'underwear',
     'swimwear',
@@ -321,27 +412,31 @@ function extractExclusions(lower: string): ExtractResult {
     'digital',
     'downloadable',
     'gift card',
+    'earrings',
+    'beauty products',
   ];
 
   const sentences = getSentences(lower);
   const matched: string[] = [];
-  let hasHighConfidence = false;
+  let bestScore = 0;
+  let hasStrong = false;
 
   for (const sentence of sentences) {
-    if (keywords.some((kw) => sentence.includes(kw))) {
-      const trimmed = sentence.trim();
-      if (!matched.includes(trimmed)) matched.push(trimmed);
-      if (highConfidenceKeywords.some((kw) => sentence.includes(kw))) {
-        hasHighConfidence = true;
-      }
-    }
+    const hits = keywords.filter((kw) => sentence.includes(kw));
+    const strong = strongExclusionPatterns.some((pattern) => pattern.test(sentence));
+    if (hits.length === 0 && !strong) continue;
+
+    const score = hits.length + (strong ? 3 : 0) + (sentenceHasAnchor(sentence) ? 1 : 0);
+    bestScore = Math.max(bestScore, score);
+    if (strong) hasStrong = true;
+    matched.push(sentence);
   }
 
   if (matched.length === 0) return { value: null, confidence: 'low' };
 
   return {
-    value: matched.slice(0, 3).join('; '),
-    confidence: hasHighConfidence ? 'high' : 'medium',
+    value: summarizeSentences(matched, 3),
+    confidence: hasStrong ? 'high' : estimateConfidence(bestScore),
   };
 }
 

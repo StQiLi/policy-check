@@ -5,9 +5,13 @@
  */
 
 import { logger } from './shared/logger';
-import { stripHtmlToText } from './shared/extract';
-// TODO: re-enable caching after testing
-// import { getCachedSummary, setCachedSummary } from './shared/cache';
+import {
+  stripHtmlToText,
+  compactPolicyTextForApi,
+  extractPolicyFromText,
+  scorePolicyTextQuality,
+} from './shared/extract';
+import { getCachedSummary, setCachedSummary } from './shared/cache';
 import { getPolicyType } from './shared/policyResolver';
 import type {
   ExtensionMessage,
@@ -36,6 +40,8 @@ const pendingRunDetection = new Map<
 
 const API_BASE_URL = 'http://localhost:3000/api/v1'; // TODO: read from storage / env
 const EXTENSION_VERSION = '1.0.0';
+const MIN_REFUND_POLICY_QUALITY = 6;
+const RENDER_FALLBACK_CANDIDATE_LIMIT = 3;
 
 // ── Message handler ─────────────────────────────────────────────
 
@@ -170,6 +176,29 @@ chrome.runtime.onMessage.addListener(
 
 // ── Handlers ────────────────────────────────────────────────────
 
+async function tryUseCachedSummary(domain: string, tabId: number): Promise<boolean> {
+  try {
+    const cached = await getCachedSummary(domain);
+    if (!cached) return false;
+
+    const current = tabStates.get(tabId) ?? { detection: null, summary: null, status: 'idle' as const, fromCache: false };
+    tabStates.set(tabId, { ...current, summary: cached, status: 'done', fromCache: true });
+    logger.debug('Using cached policy summary', { domain, tabId, policyUrl: cached.policyUrl });
+    return true;
+  } catch (err) {
+    logger.warn('Failed reading policy cache', { domain, err });
+    return false;
+  }
+}
+
+async function cacheSummary(domain: string, summary: PolicySummary): Promise<void> {
+  try {
+    await setCachedSummary(domain, summary);
+  } catch (err) {
+    logger.warn('Failed writing policy cache', { domain, err });
+  }
+}
+
 function handleShopifyDetected(detection: DetectionResult, tabId?: number): void {
   if (!tabId) return;
 
@@ -188,6 +217,7 @@ function handlePolicyExtracted(summary: PolicySummary, tabId?: number): void {
   if (!tabId) return;
   const current = tabStates.get(tabId) ?? { detection: null, summary: null, status: 'idle' as const, fromCache: false };
   tabStates.set(tabId, { ...current, summary, status: 'done', fromCache: false });
+  void cacheSummary(summary.storeDomain, summary);
   logger.debug('Policy extracted for tab', tabId);
 }
 
@@ -208,12 +238,15 @@ async function handlePolicyPageFound(
 ): Promise<void> {
   if (!tabId) return;
 
+  if (await tryUseCachedSummary(domain, tabId)) return;
+
   const current = tabStates.get(tabId) ?? { detection: null, summary: null, status: 'idle' as const, fromCache: false };
   tabStates.set(tabId, { ...current, status: 'extracting' });
 
   const text = stripHtmlToText(rawHtml);
   const summary = await buildSummary(text, policyUrl, domain);
 
+  await cacheSummary(domain, summary);
   tabStates.set(tabId, { ...tabStates.get(tabId)!, summary, status: 'done', fromCache: false });
 }
 
@@ -223,6 +256,8 @@ async function handlePolicyUrlsResolved(
   tabId?: number,
 ): Promise<void> {
   if (!tabId) return;
+
+  if (await tryUseCachedSummary(domain, tabId)) return;
 
   const current = tabStates.get(tabId) ?? { detection: null, summary: null, status: 'idle' as const, fromCache: false };
   tabStates.set(tabId, { ...current, status: 'fetching' });
@@ -235,23 +270,46 @@ async function handlePolicyUrlsResolved(
 
   tabStates.set(tabId, { ...tabStates.get(tabId)!, status: 'extracting' });
 
-  const result = await fetchFirstValidPolicy(candidates);
-  if (!result && urls.shippingPolicy) {
-    const shippingHtml = await fetchPolicyHtml(urls.shippingPolicy);
-    const text = stripHtmlToText(shippingHtml);
-    const summary = await buildSummary(text, urls.shippingPolicy, domain);
+  const result = await fetchBestPolicyCandidate(candidates);
+  if (result && result.quality >= MIN_REFUND_POLICY_QUALITY) {
+    logger.debug('Using refund policy candidate', { url: result.url, quality: result.quality });
+    const summary = await buildSummary(result.text, result.url, domain);
+    await cacheSummary(domain, summary);
     tabStates.set(tabId, { ...tabStates.get(tabId)!, summary, status: 'done', fromCache: false });
     return;
   }
 
-  if (!result) {
-    tabStates.set(tabId, { ...tabStates.get(tabId)!, status: 'done', fromCache: false });
+  // Only fallback to shipping policy when we had no refund candidates at all.
+  if (candidates.length === 0 && urls.shippingPolicy) {
+    logger.debug('No refund candidates; falling back to shipping policy', urls.shippingPolicy);
+    const shippingHtml = await fetchPolicyHtml(urls.shippingPolicy);
+    const text = stripHtmlToText(shippingHtml);
+    const summary = await buildSummary(text, urls.shippingPolicy, domain);
+    await cacheSummary(domain, summary);
+    tabStates.set(tabId, { ...tabStates.get(tabId)!, summary, status: 'done', fromCache: false });
     return;
   }
 
-  const text = stripHtmlToText(result.html);
-  const summary = await buildSummary(text, result.url, domain);
-  tabStates.set(tabId, { ...tabStates.get(tabId)!, summary, status: 'done', fromCache: false });
+  logger.debug('No high-quality refund policy candidate found', {
+    bestCandidate: result?.url ?? null,
+    bestQuality: result?.quality ?? null,
+    candidateCount: candidates.length,
+  });
+
+  if (candidates.some((u) => u.toLowerCase().includes('/pages/help-center'))) {
+    const rendered = await fetchBestRenderedPolicyCandidate(
+      candidates.slice(0, RENDER_FALLBACK_CANDIDATE_LIMIT)
+    );
+    if (rendered && rendered.quality >= MIN_REFUND_POLICY_QUALITY) {
+      logger.debug('Using rendered fallback candidate', { url: rendered.url, quality: rendered.quality });
+      const summary = await buildSummary(rendered.text, rendered.url, domain);
+      await cacheSummary(domain, summary);
+      tabStates.set(tabId, { ...tabStates.get(tabId)!, summary, status: 'done', fromCache: false });
+      return;
+    }
+  }
+
+  tabStates.set(tabId, { ...tabStates.get(tabId)!, status: 'done', fromCache: false });
 }
 
 // ── AI extraction ───────────────────────────────────────────────
@@ -261,6 +319,7 @@ async function buildSummary(
   policyUrl: string,
   domain: string,
 ): Promise<PolicySummary> {
+  const compactText = compactPolicyTextForApi(text);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
 
@@ -269,7 +328,7 @@ async function buildSummary(
       method: 'POST',
       signal: controller.signal,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: text.slice(0, 8000), domain }),
+      body: JSON.stringify({ text: compactText, domain }),
     });
 
     if (!response.ok) {
@@ -285,31 +344,56 @@ async function buildSummary(
       confidence: PolicyConfidence;
     };
 
+    const hasUsefulField = Object.values(data.fields ?? {}).some(
+      (v) => typeof v === 'string' && v.trim().length > 0
+    );
+    if (!hasUsefulField) {
+      return extractPolicyFromText(compactText, policyUrl, domain);
+    }
+
     return {
       storeDomain: domain,
       policyUrl,
       extractedAt: new Date().toISOString(),
       fields: data.fields,
       confidence: data.confidence,
-      rawTextSnippet: text.slice(0, 500),
+      rawTextSnippet: compactText.slice(0, 500),
     };
+  } catch (err) {
+    logger.warn('AI extract failed, falling back to local heuristics:', err);
+    return extractPolicyFromText(compactText, policyUrl, domain);
   } finally {
     clearTimeout(timeoutId);
   }
 }
 
-async function fetchFirstValidPolicy(
+async function fetchBestPolicyCandidate(
   candidates: string[],
-): Promise<{ url: string; html: string } | null> {
+): Promise<{ url: string; html: string; text: string; quality: number } | null> {
+  let best: { url: string; html: string; text: string; quality: number } | null = null;
+
   for (const url of candidates) {
     try {
       const html = await fetchPolicyHtml(url);
-      return { url, html };
+      const text = stripHtmlToText(html);
+      const compact = compactPolicyTextForApi(text);
+      const quality = scorePolicyTextQuality(compact);
+      const candidate = { url, html, text, quality };
+      logger.debug('Policy candidate scored', { url, quality });
+
+      if (!best || candidate.quality > best.quality) {
+        best = candidate;
+      }
+
+      if (quality >= 8) {
+        return candidate;
+      }
     } catch {
       logger.debug('Candidate URL failed, trying next:', url);
     }
   }
-  return null;
+
+  return best;
 }
 
 async function fetchPolicyHtml(url: string): Promise<string> {
@@ -337,10 +421,101 @@ async function fetchPolicyHtml(url: string): Promise<string> {
   }
 }
 
+async function fetchBestRenderedPolicyCandidate(
+  candidates: string[],
+): Promise<{ url: string; text: string; quality: number } | null> {
+  let best: { url: string; text: string; quality: number } | null = null;
+
+  for (const url of candidates) {
+    const renderedText = await fetchRenderedTextFromHiddenTab(url);
+    if (!renderedText) continue;
+
+    const compact = compactPolicyTextForApi(renderedText);
+    const quality = scorePolicyTextQuality(compact);
+    const candidate = { url, text: renderedText, quality };
+    logger.debug('Rendered candidate scored', { url, quality });
+
+    if (!best || candidate.quality > best.quality) best = candidate;
+    if (quality >= 8) return candidate;
+  }
+
+  return best;
+}
+
+async function fetchRenderedTextFromHiddenTab(url: string): Promise<string | null> {
+  let tabId: number | null = null;
+  try {
+    const created = await chrome.tabs.create({ url, active: false });
+    tabId = created.id ?? null;
+    if (!tabId) return null;
+
+    await waitForTabComplete(tabId, 15000);
+
+    const execution = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async () => {
+        const hasSignal = (): boolean =>
+          /\breturn|refund|exchange|final sale|non-returnable|defective|restocking\b/i.test(
+            document.body?.innerText ?? ''
+          );
+
+        if (!hasSignal()) {
+          await new Promise<void>((resolve) => {
+            const timeoutId = setTimeout(() => resolve(), 5000);
+            const observer = new MutationObserver(() => {
+              if (hasSignal()) {
+                clearTimeout(timeoutId);
+                observer.disconnect();
+                resolve();
+              }
+            });
+            observer.observe(document.documentElement, {
+              childList: true,
+              subtree: true,
+              characterData: true,
+            });
+          });
+        }
+
+        return document.body?.innerText ?? '';
+      },
+    });
+
+    const text = execution[0]?.result;
+    return typeof text === 'string' ? text : null;
+  } catch (err) {
+    logger.debug('Rendered-tab extraction failed', { url, err });
+    return null;
+  } finally {
+    if (tabId != null) {
+      chrome.tabs.remove(tabId).catch(() => {});
+    }
+  }
+}
+
+async function waitForTabComplete(tabId: number, timeoutMs: number): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab.status === 'complete') return;
+    } catch {
+      // Tab may close.
+      return;
+    }
+    await sleep(250);
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // ── Backend API ─────────────────────────────────────────────────
 
 async function saveSnapshot(summary: PolicySummary): Promise<unknown> {
-  const { authToken } = await chrome.storage.sync.get('authToken');
+  const { authToken: rawToken } = await chrome.storage.sync.get('authToken');
+  const authToken = typeof rawToken === 'string' ? rawToken.trim() : '';
 
   if (!authToken) {
     throw new Error('No auth token configured. Set one in extension options.');

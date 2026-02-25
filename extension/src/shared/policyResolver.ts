@@ -53,30 +53,124 @@ function buildCandidateUrls(base: string, key: string): string[] {
 }
 
 /**
- * Search footer links for a policy URL matching one of the given keywords.
+ * Search footer links for the best policy URL matching include keywords while
+ * avoiding links that match avoid keywords.
  */
-function findPolicyInFooter(keywords: string[]): string | null {
+function findBestFooterLink(includeKeywords: string[], avoidKeywords: string[] = []): string | null {
   const footer = document.querySelector('footer');
   if (!footer) return null;
 
   const links = Array.from(footer.querySelectorAll<HTMLAnchorElement>('a[href]'));
+  let best: { url: string; score: number } | null = null;
 
   for (const link of links) {
-    const text = link.textContent?.toLowerCase() ?? '';
-    const href = link.getAttribute('href') ?? '';
+    const resolved = resolveSameOriginHref(link.getAttribute('href'));
+    if (!resolved) continue;
 
-    if (keywords.some((kw) => text.includes(kw) || href.includes(kw))) {
-      try {
-        const resolved = new URL(href, window.location.origin).href;
-        if (new URL(resolved).origin !== window.location.origin) return null;
-        return resolved;
-      } catch {
-        return null;
-      }
-    }
+    const text = (link.textContent ?? '').toLowerCase();
+    const lowerUrl = resolved.toLowerCase();
+    const includeHits = includeKeywords.filter((kw) => text.includes(kw) || lowerUrl.includes(kw)).length;
+    if (includeHits === 0) continue;
+
+    const avoidHits = avoidKeywords.filter((kw) => text.includes(kw) || lowerUrl.includes(kw)).length;
+    const score = includeHits * 4 - avoidHits * 3 + (text.length > 4 ? 1 : 0);
+
+    if (!best || score > best.score) best = { url: resolved, score };
   }
 
-  return null;
+  return best?.url ?? null;
+}
+
+function findRefundCandidatesInFooter(): string[] {
+  const footer = document.querySelector('footer');
+  if (!footer) return [];
+
+  const links = Array.from(footer.querySelectorAll<HTMLAnchorElement>('a[href]'));
+  const scored: { url: string; score: number }[] = [];
+
+  for (const link of links) {
+    const resolved = resolveSameOriginHref(link.getAttribute('href'));
+    if (!resolved) continue;
+
+    const text = (link.textContent ?? '').toLowerCase();
+    const lowerUrl = resolved.toLowerCase();
+    const merged = `${text} ${lowerUrl}`;
+
+    const positiveTextHits = REFUND_TEXT_KEYWORDS.filter((kw) => text.includes(kw)).length;
+    const positiveUrlHits = REFUND_PATH_KEYWORDS.filter((kw) => lowerUrl.includes(kw)).length;
+    const negativeHits = REFUND_NEGATIVE_KEYWORDS.filter((kw) => merged.includes(kw)).length;
+    const hasHelpCenter = lowerUrl.includes('help-center');
+    const hcUrl = getHelpCenterArticlePath(lowerUrl);
+
+    let score = positiveTextHits * 6 + positiveUrlHits * 5 - negativeHits * 3;
+    if (hasHelpCenter) score += 1;
+    if (hcUrl && /\breturn|refund|exchange\b/.test(hcUrl)) score += 6;
+    if (text.includes('returns')) score += 3;
+    if (lowerUrl.includes('/policies/refund-policy')) score += 8;
+    if (score <= 0) continue;
+
+    scored.push({ url: resolved, score });
+  }
+
+  return dedupeUrls(scored.sort((a, b) => b.score - a.score).map((s) => s.url));
+}
+
+function resolveSameOriginHref(rawHref: string | null): string | null {
+  if (!rawHref) return null;
+  try {
+    const resolved = new URL(rawHref, window.location.origin).href;
+    return new URL(resolved).origin === window.location.origin ? resolved : null;
+  } catch {
+    return null;
+  }
+}
+
+function getHelpCenterArticlePath(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const hcUrl = parsed.searchParams.get('hcUrl');
+    return hcUrl ? decodeURIComponent(hcUrl).toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+function expandHelpCenterRefundCandidates(url: string): string[] {
+  const lower = url.toLowerCase();
+  if (!lower.includes('help-center')) return [url];
+
+  const candidates = [url];
+  try {
+    const parsed = new URL(url);
+    const currentHcUrl = parsed.searchParams.get('hcUrl');
+    const decoded = currentHcUrl ? decodeURIComponent(currentHcUrl).toLowerCase() : '';
+
+    const refundArticlePaths = [
+      '/en-us/return-policy-and-process',
+      '/en-US/return-policy-and-process',
+      '/en-us/returns',
+      '/en-US/returns',
+      '/en-us/return-policy',
+      '/en-US/return-policy',
+    ];
+
+    for (const path of refundArticlePaths) {
+      const next = new URL(parsed.href);
+      next.searchParams.set('hcUrl', path);
+      candidates.push(next.href);
+    }
+
+    if (decoded.includes('shipping-options')) {
+      const patched = decoded.replace('shipping-options-prices-and-times', 'return-policy-and-process');
+      const next = new URL(parsed.href);
+      next.searchParams.set('hcUrl', patched);
+      candidates.push(next.href);
+    }
+  } catch {
+    // Keep original candidate only.
+  }
+
+  return dedupeUrls(candidates);
 }
 
 /**
@@ -84,6 +178,7 @@ function findPolicyInFooter(keywords: string[]): string | null {
  */
 export function isPolicyPage(): boolean {
   const path = window.location.pathname.toLowerCase();
+  const search = window.location.search.toLowerCase();
   return (
     path.includes('/policies/') ||
     path.includes('/pages/return') ||
@@ -98,6 +193,11 @@ export function isPolicyPage(): boolean {
  */
 export function getPolicyType(url: string): string {
   const lower = url.toLowerCase();
+  const helpCenterArticle = getHelpCenterArticlePath(url);
+  if (helpCenterArticle && /\brefund|return|exchange\b/.test(helpCenterArticle)) {
+    return 'refund';
+  }
+
   if (lower.includes('refund') || lower.includes('return')) return 'refund';
   if (lower.includes('shipping') || lower.includes('delivery')) return 'shipping';
   if (lower.includes('privacy')) return 'privacy';

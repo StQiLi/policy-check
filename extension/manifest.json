@@ -3,7 +3,7 @@
   "name": "Return Clarity for Shopify",
   "version": "1.0.0",
   "description": "Automatically extract and display return policy summaries for Shopify stores",
-  "permissions": ["activeTab", "storage", "scripting"],
+  "permissions": ["activeTab", "storage", "scripting", "tabs"],
   "host_permissions": ["*://*.myshopify.com/*", "*://*/*"],
   "background": {
     "service_worker": "src/background.ts",
